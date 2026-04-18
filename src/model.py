@@ -136,8 +136,10 @@ class GenesisDecoder(nn.Module):
             nn.ReLU(inplace=True),
             ResBlock(256),
             ResBlock(256),
-            ResBlock(256),  # Extra capacity for Elite HD
-            ResBlock(256),  # Extra capacity for Elite HD
+            ResBlock(256),
+            ResBlock(256),
+            ResBlock(256), # Extra Depth for 40dB Apex
+            ResBlock(256), # Extra Depth for 40dB Apex
         )
         # 256ch → PixelShuffle(2) → 64ch, spatial ×2
         self.up1 = nn.Sequential(

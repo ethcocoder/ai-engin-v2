@@ -47,9 +47,10 @@ def train_tpu_direct(flags):
     # 2. Neural Manifold Initialization
     model = LatentGenesisCore(latent_channels=flags['latent_channels']).to(device)
     optimizer = optim.Adam(model.parameters(), lr=flags['lr'])
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=flags['epochs'])
     perc_engine = PerceptualLoss().to(device).eval()
     
-    # 3. Phase 2 Synthesis
+    # 3. Phase 3 Synthesis (40dB Apex)
     for epoch in range(flags['epochs']):
         model.train()
         for i, (images, _) in enumerate(train_device_loader):
@@ -57,32 +58,26 @@ def train_tpu_direct(flags):
             
             recon, mu, logvar = model(images)
             
-            # Loss Synthesis (Phase 2.3 High-Stability Calibration)
+            # High-Precision Loss (Phase 3 Calibration)
             l1_l = F.l1_loss(recon, images)
             s_l  = ssim_loss(recon, images)
             p_l  = perc_engine(recon, images)
             
-            # KLD Stability Gate (Crucial for preventing green collapse)
             logvar_c = torch.clamp(logvar, -10, 10)
             kld_l = -0.5 * torch.mean(1 + logvar_c - mu.pow(2) - logvar_c.exp())
             
-            # Hybrid Elite Loss: 10x L1 Bedrock + Subtle Texture Polishing
-            # This ratio prevents the "Green Noise" collapse 
-            loss = (l1_l * 10.0) + (s_l * 0.05) + (p_l * 0.01) + (kld_l * 0.0001)
+            # Bedrock Accuracy Focus
+            loss = (l1_l * 20.0) + (s_l * 0.1) + (p_l * 0.05) + (kld_l * 0.0001)
             
-            # --- Paradox Stability Gate ---
             loss.backward()
-            
-            # Explicit Gradient Clipping to prevent "Checkerboard Chaos"
             nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            
             xm.optimizer_step(optimizer)
             
-            if i == 0:
-                print(f"[*] Neural Reality Anchored. Sync loop active.", flush=True)
-            
             if i % 20 == 0:
-                print(f"Epoch [{epoch+1}/{flags['epochs']}] | Batch {i} | Loss: {loss.item():.4f}", flush=True)
+                print(f"Epoch [{epoch+1}/{flags['epochs']}] | Batch {i} | Loss: {loss.item():.4f} | LR: {scheduler.get_last_lr()[0]:.6f}", flush=True)
+
+        # Learning Rate Cooling
+        scheduler.step()
 
         # Sync Master Weights
         save_path = "checkpoints/universal_tpu_master.pth"
@@ -96,10 +91,10 @@ def train_tpu_direct(flags):
 if __name__ == "__main__":
     if TPU_AVAILABLE:
         flags = {
-            'batch_size': 32,
-            'epochs': 100,
-            'lr': 1e-4,
-            'latent_channels': 16,
-            'sample_limit': 10000
+            'batch_size': 64,
+            'epochs': 200,
+            'lr': 2e-4,
+            'latent_channels': 32,
+            'sample_limit': 50000
         }
         train_tpu_direct(flags)
