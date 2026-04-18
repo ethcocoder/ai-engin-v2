@@ -12,6 +12,7 @@ Architecture:
 
 import sys
 import numpy as np
+import os
 import torch
 import torch.nn as nn
 from pathlib import Path
@@ -229,7 +230,38 @@ class LatentGenesisCore(nn.Module):
         self, mu: torch.Tensor, logvar: torch.Tensor
     ) -> torch.Tensor:
         """
-        QVS-modulated reparameterization trick.
+        QVS-modulated reparameterization trick with TPU-Vectorization support.
+        """
+        batch_size = mu.shape[0]
+        std = torch.exp(0.5 * logvar)
+        
+        # --- Paradox TPU-Optimization Check ---
+        _is_tpu = 'PJRT_DEVICE' in os.environ or 'TPU_NAME' in os.environ
+
+        if self.training:
+            if _is_tpu:
+                # Use Pure Tensor Math on TPU to prevent CPU synchronization bottlenecks
+                # This approximates the phase-weave without the slow Python loop
+                eps = torch.randn_like(std)
+            else:
+                phase_biases = []
+                for i in range(batch_size):
+                    asc_id = self.qvs.create_asc(size=2)
+                    self.qvs.SUPERPOSE(asc_id, [(0, 0), (0, 1), (1, 0), (1, 1)])
+                    intensity = torch.mean(mu[i]).item()
+                    self.qvs.WEAVE(asc_id, phase_angle=intensity * np.pi)
+                    outcome = self.qvs.COLLAPSE(asc_id)
+                    phase_biases.append(1.0 if sum(outcome) % 2 == 0 else -1.0)
+                    self.qvs.delete_asc(asc_id)
+
+                bias_tensor = torch.tensor(
+                    phase_biases, dtype=torch.float32, device=mu.device
+                ).view(batch_size, 1, 1, 1)
+                eps = torch.randn_like(std) * bias_tensor
+        else:
+            eps = torch.randn_like(std) * 0.1
+
+        return mu + eps * std
 
         During training, encodes each sample's mean latent intensity into a
         4-state quantum basis, applies a phase WEAVE, and uses the COLLAPSE
