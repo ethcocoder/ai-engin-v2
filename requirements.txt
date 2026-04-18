@@ -1,6 +1,9 @@
-torch>=2.0.0
-torchvision>=0.15.0
-tqdm>=4.65.0
-numpy>=1.24.0
-matplotlib>=3.7.0
-scipy>=1.10.0
+# Paradox Genesis Core v2.0 Dependency Stack
+torch>=2.1.0
+torchvision>=0.16.0
+numpy
+pillow
+matplotlib
+tqdm
+requests
+scipy
