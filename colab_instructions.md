@@ -30,8 +30,8 @@ Optimized for Google Colab T4/A100. Trains on the "Visual Grammar" of the world.
 ### Path B: Elite TPU Reformation (Retina-Grade)
 Optimized for **TPU v2/v3/v5e**. This is the highest level of neural production, providing near-perfect HD details.
 ```bash
-# 1. Install TPU Support (Smart-Version Resolution)
-!pip install torch~=2.1.0 torchvision~=0.16.0 torch_xla[tpu]~=2.1.0 -f https://storage.googleapis.com/tpu-pytorch/wheels/colab/torch_xla-2.1.0-py3-none-any.whl
+# 1. Install TPU Support (Absolute Evolution Path)
+!pip install torch torchvision torch_xla[tpu]
 
 # 2. Fire the Distributed Manifold Engine
 !python src/train_tpu.py --epochs 100 --batch_size 32 --sample_limit 10000
