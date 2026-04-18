@@ -63,16 +63,16 @@ def train_tpu_direct(flags):
             
             recon, mu, logvar = model(images)
             
-            # Loss Synthesis
+            # Loss Synthesis (Phase 2.4 - Sovereign Stability)
             l1_l = F.l1_loss(recon, images)
-            s_l  = ssim_loss(recon, images)
-            p_l  = perc_engine(recon, images)
+            s_l  = torch.clamp(ssim_loss(recon, images), 0, 1)
+            p_l  = torch.clamp(perc_engine(recon, images), 0, 100)
             
-            logvar_c = torch.clamp(logvar, -10, 10)
-            kld_l = -0.5 * torch.mean(1 + logvar_c - mu.pow(2) - logvar_c.exp())
+            # KLD (Already clamped in model.py)
+            kld_l = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
             
-            # Calibration: Stability-First L1 Anchor
-            loss = (l1_l * 10.0) + (s_l * 0.05) + (p_l * 0.01) + (kld_l * 0.0001)
+            # Master Ratio for 40dB Stability
+            loss = (l1_l * 10.0) + (s_l * 0.1) + (p_l * 0.01) + (kld_l * 0.0001)
             
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -100,7 +100,7 @@ if __name__ == "__main__":
         flags = {
             'batch_size': 32,
             'epochs': 100,
-            'lr': 2e-4,
+            'lr': 1e-4,
             'latent_channels': 16,
             'sample_limit': 10000
         }

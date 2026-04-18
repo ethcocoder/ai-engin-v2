@@ -235,6 +235,10 @@ class LatentGenesisCore(nn.Module):
         QVS-modulated reparameterization trick with TPU-Vectorization support.
         """
         batch_size = mu.shape[0]
+        
+        # --- Paradox NaN-Shield ---
+        # Clamp log-variance to prevent exponential explosions
+        logvar = torch.clamp(logvar, -10.0, 10.0)
         std = torch.exp(0.5 * logvar)
         
         # --- Paradox TPU-Optimization Check ---
