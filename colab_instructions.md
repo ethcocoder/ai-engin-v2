@@ -31,6 +31,20 @@ This path trains the model to memorize 4 specific HD images flawlessly. Use this
 ```
 *   **Result**: `hd_genesis_core.pth` (Overfitted for a perfect 1080p demo).
 
+### Path C: The TPU "Elite" Path (Retina-Grade)
+Use this for full-scale training on Google Cloud TPUs. This is 10x faster and allows for the highest possible fidelity for 1080p images.
+
+```bash
+# 1. Install TPU Support (Google Colab only)
+!pip install cloud-tpu-client==0.10 torch==2.1.0 torchvision==0.16.0 https://storage.googleapis.com/tpu-pytorch/wheels/colab/torch_xla-2.1.0-cp310-cp310-linux_x86_64.whl
+
+# 2. Run the TPU Distributed Trainer
+!python src/train_tpu.py --epochs 100 --batch_size 32
+```
+*   **Result**: `universal_tpu_master.pth` (The peak paradox engine).
+
+---
+
 ---
 
 ## Step 3: The Ultimate Test (Generalization Check)
