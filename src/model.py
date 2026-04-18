@@ -263,52 +263,6 @@ class LatentGenesisCore(nn.Module):
 
         return mu + eps * std
 
-        During training, encodes each sample's mean latent intensity into a
-        4-state quantum basis, applies a phase WEAVE, and uses the COLLAPSE
-        outcome to determine a ±1 phase bias for the noise vector.
-
-        During inference, uses low-temperature noise (σ=0.1) for slight
-        stochastic diversity without distributional shift.
-
-        Args:
-            mu:     Latent mean,     shape (B, C, H, W).
-            logvar: Latent log-var,  shape (B, C, H, W).
-
-        Returns:
-            z: Reparameterized latent sample, same shape as mu.
-        """
-        batch_size = mu.shape[0]
-        std = torch.exp(0.5 * logvar)
-
-        if self.training:
-            phase_biases = []
-            for i in range(batch_size):
-                # Encode latent intensity into a 4-state quantum basis
-                # (representing the 4 quadrants of the complex Hilbert space)
-                asc_id = self.qvs.create_asc(size=2)
-                self.qvs.SUPERPOSE(asc_id, [(0, 0), (0, 1), (1, 0), (1, 1)])
-
-                # WEAVE a phase shift proportional to the mean latent energy
-                intensity = torch.mean(mu[i]).item()
-                self.qvs.WEAVE(asc_id, phase_angle=intensity * np.pi)
-
-                # COLLAPSE to a binary outcome and map to ±1 bias
-                outcome = self.qvs.COLLAPSE(asc_id)
-                phase_biases.append(1.0 if sum(outcome) % 2 == 0 else -1.0)
-
-                # Release quantum resources
-                self.qvs.delete_asc(asc_id)
-
-            bias_tensor = torch.tensor(
-                phase_biases, dtype=torch.float32, device=mu.device
-            ).view(batch_size, 1, 1, 1)
-            eps = torch.randn_like(std) * bias_tensor
-        else:
-            # Inference: low-temperature sampling for smooth diversity
-            eps = torch.randn_like(std) * 0.1
-
-        return mu + eps * std
-
     def forward(
         self, x: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
