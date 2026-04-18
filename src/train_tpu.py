@@ -69,15 +69,20 @@ def train_tpu_direct(flags):
             loss.backward()
             xm.optimizer_step(optimizer)
             
+            if i == 0:
+                print(f"[*] Neural Warmup Complete. Synthesis loop active.", flush=True)
+            
             if i % 20 == 0:
-                print(f"Epoch [{epoch+1}/{flags['epochs']}] | Batch {i} | Loss: {loss.item():.4f}")
+                print(f"Epoch [{epoch+1}/{flags['epochs']}] | Batch {i} | Loss: {loss.item():.4f}", flush=True)
 
         # Sync Master Weights
+        save_path = "checkpoints/universal_tpu_master.pth"
+        os.makedirs("checkpoints", exist_ok=True)
         xm.save({
             'epoch': epoch,
             'model_state_dict': model.state_dict(),
-        }, "checkpoints/universal_tpu_master.pth")
-        print(f"[*] Master Synchronized: Epoch {epoch+1}")
+        }, save_path)
+        print(f"--- [MASTER SYNCHRONIZED] Checkpoint saved: {save_path} ---", flush=True)
 
 if __name__ == "__main__":
     if TPU_AVAILABLE:
