@@ -7,6 +7,7 @@ Bypasses the cluster address mismatch by using Direct Synthesis.
 
 import os
 import torch
+import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
@@ -56,21 +57,22 @@ def train_tpu_direct(flags):
             
             recon, mu, logvar = model(images)
             
-            # Loss Synthesis
+            # Loss Synthesis (Phase 2 Stability logic)
             l1_l = F.l1_loss(recon, images)
-            s_l  = ssim_loss(recon, images)
-            p_l  = perc_engine(recon, images)
             
-            logvar_c = torch.clamp(logvar, -10, 10)
-            kld_l = -0.5 * torch.mean(1 + logvar_c - mu.pow(2) - logvar_c.exp())
+            # Anchor reality first, then introduce perceptual complexity
+            loss = l1_l * 10.0 # High-intensity anchor
             
-            loss = l1_l + (0.5 * s_l) + (0.1 * p_l) + (0.001 * kld_l)
-            
+            # --- Paradox Stability Gate ---
             loss.backward()
+            
+            # Explicit Gradient Clipping to prevent "Checkerboard Chaos"
+            nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            
             xm.optimizer_step(optimizer)
             
             if i == 0:
-                print(f"[*] Neural Warmup Complete. Synthesis loop active.", flush=True)
+                print(f"[*] Neural Reality Anchored. Sync loop active.", flush=True)
             
             if i % 20 == 0:
                 print(f"Epoch [{epoch+1}/{flags['epochs']}] | Batch {i} | Loss: {loss.item():.4f}", flush=True)
@@ -89,7 +91,7 @@ if __name__ == "__main__":
         flags = {
             'batch_size': 32,
             'epochs': 100,
-            'lr': 2e-4,
+            'lr': 5e-4,
             'latent_channels': 16,
             'sample_limit': 10000
         }
