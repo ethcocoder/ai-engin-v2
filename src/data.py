@@ -8,6 +8,7 @@ Images are 96x96 (HD-base), providing much higher frequency detail
 than CIFAR-10, allowing the model to learn universal textures.
 """
 
+import os
 import torchvision
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
@@ -60,6 +61,11 @@ def get_dataloaders(
             root=root, train=False, download=True, transform=test_transform
         )
 
+    # TPU Stability Handle: Force 0 workers if running on XLA
+    _is_tpu = 'PJRT_DEVICE' in os.environ or 'TPU_NAME' in os.environ
+    if _is_tpu:
+        num_workers = 0
+        
     _persistent = num_workers > 0
     trainloader = DataLoader(
         trainset, batch_size=batch_size, shuffle=True,
