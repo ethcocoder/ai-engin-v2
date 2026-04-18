@@ -57,17 +57,18 @@ def train_tpu_direct(flags):
             
             recon, mu, logvar = model(images)
             
-            # Loss Synthesis (Phase 2.2 Retina Sharpening)
+            # Loss Synthesis (Phase 2.3 High-Stability Calibration)
             l1_l = F.l1_loss(recon, images)
             s_l  = ssim_loss(recon, images)
             p_l  = perc_engine(recon, images)
             
-            # KLD Stability Gate
+            # KLD Stability Gate (Crucial for preventing green collapse)
             logvar_c = torch.clamp(logvar, -10, 10)
             kld_l = -0.5 * torch.mean(1 + logvar_c - mu.pow(2) - logvar_c.exp())
             
-            # Hybrid Elite Loss: Reality Anchor (L1) + Texture Sharpness (SSIM+Perc)
-            loss = (l1_l * 5.0) + (s_l * 0.5) + (p_l * 0.1) + (kld_l * 0.001)
+            # Hybrid Elite Loss: 10x L1 Bedrock + Subtle Texture Polishing
+            # This ratio prevents the "Green Noise" collapse 
+            loss = (l1_l * 10.0) + (s_l * 0.05) + (p_l * 0.01) + (kld_l * 0.0001)
             
             # --- Paradox Stability Gate ---
             loss.backward()
@@ -97,7 +98,7 @@ if __name__ == "__main__":
         flags = {
             'batch_size': 32,
             'epochs': 100,
-            'lr': 5e-4,
+            'lr': 1e-4,
             'latent_channels': 16,
             'sample_limit': 10000
         }
