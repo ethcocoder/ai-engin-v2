@@ -102,9 +102,12 @@ def main():
     if not TPU_AVAILABLE:
         return
     
-    # Hyper-parameters for the TPU Rocket
+    # --- Paradox v5e Local Configuration ---
+    # This bypasses the cluster networking error by forcing Local Mode
+    os.environ['XRT_TPU_CONFIG'] = "localservice;0;localhost:51011"
+    
     flags = {
-        'batch_size': 32, # TPU can handle large batches
+        'batch_size': 32,
         'epochs': 100,
         'lr': 2e-4,
         'latent_channels': 16,
@@ -112,9 +115,13 @@ def main():
         'seed': 42
     }
     
-    # Spawn parallel processes (None = Auto-detect all TPU cores)
-    print("[SYSTEM] Spawning Paradox Manifold Cores...")
-    xmp.spawn(train_loop, args=(flags,), nprocs=None, start_method='fork')
+    print("[SYSTEM] Activating Paradox Sovereign v5e Engine...")
+    try:
+        # On v5e-1, we run the loop directly to avoid the cluster address bug
+        train_loop(0, flags)
+    except Exception as e:
+        print(f"[!] Primary Manifold failed. Falling back to multi-core spawn...")
+        xmp.spawn(train_loop, args=(flags,), nprocs=None, start_method='fork')
 
 if __name__ == "__main__":
     main()
