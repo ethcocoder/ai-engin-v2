@@ -107,9 +107,9 @@ def main():
         'seed': 42
     }
     
-    # Spawn 8 parallel processes (one for each TPU core)
-    print("[SYSTEM] Spawning 8 Paradox Manifold Cores...")
-    xmp.spawn(train_loop, args=(flags,), nprocs=8, start_method='fork')
+    # Spawn parallel processes (None = Auto-detect all TPU cores)
+    print("[SYSTEM] Spawning Paradox Manifold Cores...")
+    xmp.spawn(train_loop, args=(flags,), nprocs=None, start_method='fork')
 
 if __name__ == "__main__":
     main()
