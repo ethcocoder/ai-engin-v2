@@ -57,11 +57,17 @@ def train_tpu_direct(flags):
             
             recon, mu, logvar = model(images)
             
-            # Loss Synthesis (Phase 2 Stability logic)
+            # Loss Synthesis (Phase 2.2 Retina Sharpening)
             l1_l = F.l1_loss(recon, images)
+            s_l  = ssim_loss(recon, images)
+            p_l  = perc_engine(recon, images)
             
-            # Anchor reality first, then introduce perceptual complexity
-            loss = l1_l * 10.0 # High-intensity anchor
+            # KLD Stability Gate
+            logvar_c = torch.clamp(logvar, -10, 10)
+            kld_l = -0.5 * torch.mean(1 + logvar_c - mu.pow(2) - logvar_c.exp())
+            
+            # Hybrid Elite Loss: Reality Anchor (L1) + Texture Sharpness (SSIM+Perc)
+            loss = (l1_l * 5.0) + (s_l * 0.5) + (p_l * 0.1) + (kld_l * 0.001)
             
             # --- Paradox Stability Gate ---
             loss.backward()
