@@ -54,7 +54,10 @@ def train_loop(index, flags):
 
     # 3. Model & Optimizer
     model = LatentGenesisCore(latent_channels=flags['latent_channels']).to(device)
-    optimizer = optim.Adam(model.parameters(), lr=flags['lr'] * xm.xrt_world_size()) # Scale LR for TPU
+    
+    # Scale LR for TPU (using the modern world_size API)
+    world_size = xm.xla_world_size()
+    optimizer = optim.Adam(model.parameters(), lr=flags['lr'] * world_size)
     
     # 4. Losses
     perc_engine = PerceptualLoss().to(device).eval()
@@ -62,7 +65,6 @@ def train_loop(index, flags):
     # 5. Training Epochs
     for epoch in range(flags['epochs']):
         model.train()
-        total_loss = 0
         
         for i, (images, _) in enumerate(train_device_loader):
             optimizer.zero_grad()
@@ -89,12 +91,10 @@ def train_loop(index, flags):
                 xm.master_print(f"Epoch [{epoch+1}/{flags['epochs']}] | Batch {i} | Loss: {loss.item():.4f}")
 
         # Save Master Weights (Checkpointing)
-        if index == 0: # Only the master core saves
+        if xm.is_master_ordinal(): 
             xm.save({
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'loss': loss,
             }, "checkpoints/universal_tpu_master.pth")
             xm.master_print(f"[*] Master Weights Synchronized: Epoch {epoch+1}")
 
@@ -103,7 +103,6 @@ def main():
         return
     
     # --- Paradox v5e Local Configuration ---
-    # This bypasses the cluster networking error by forcing Local Mode
     os.environ['XRT_TPU_CONFIG'] = "localservice;0;localhost:51011"
     
     flags = {
@@ -115,13 +114,9 @@ def main():
         'seed': 42
     }
     
-    print("[SYSTEM] Activating Paradox Sovereign v5e Engine...")
-    try:
-        # On v5e-1, we run the loop directly to avoid the cluster address bug
-        train_loop(0, flags)
-    except Exception as e:
-        print(f"[!] Primary Manifold failed. Falling back to multi-core spawn...")
-        xmp.spawn(train_loop, args=(flags,), nprocs=None, start_method='fork')
+    print("[SYSTEM] Spawning Paradox Master Cores...")
+    # Using None to auto-detect the v5e slice configuration
+    xmp.spawn(train_loop, args=(flags,), nprocs=None, start_method='fork')
 
 if __name__ == "__main__":
     main()
