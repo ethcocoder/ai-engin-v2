@@ -79,12 +79,19 @@ def ssim_loss(x, y, window_size: int = 11):
 
     mu_x = F.conv2d(x, window, padding=pad, groups=C_ch)
     mu_y = F.conv2d(y, window, padding=pad, groups=C_ch)
-    sig_xx = F.conv2d(x * x, window, padding=pad, groups=C_ch) - mu_x**2
-    sig_yy = F.conv2d(y * y, window, padding=pad, groups=C_ch) - mu_y**2
+    
+    # bf16 Stability Guard: Use ReLU to kill negative variances caused by precision drift
+    sig_xx = F.relu(F.conv2d(x * x, window, padding=pad, groups=C_ch) - mu_x**2)
+    sig_yy = F.relu(F.conv2d(y * y, window, padding=pad, groups=C_ch) - mu_y**2)
     sig_xy = F.conv2d(x * y, window, padding=pad, groups=C_ch) - mu_x*mu_y
 
-    C1, C2 = 0.01**2, 0.03**2
-    ssim_map = ((2 * mu_x * mu_y + C1) * (2 * sig_xy + C2)) / ((mu_x**2 + mu_y**2 + C1) * (sig_xx + sig_yy + C2))
+    # Heavy constants resistant to bf16 truncation
+    C1, C2 = 1e-4, 9e-4
+    
+    # Shield Denominator against NaN
+    denominator = torch.clamp((mu_x**2 + mu_y**2 + C1) * (sig_xx + sig_yy + C2), min=1e-8)
+    ssim_map = ((2 * mu_x * mu_y + C1) * (2 * sig_xy + C2)) / denominator
+    
     return 1.0 - ssim_map.mean()
 
 

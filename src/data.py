@@ -70,12 +70,12 @@ def get_dataloaders(
     trainloader = DataLoader(
         trainset, batch_size=batch_size, shuffle=True,
         num_workers=num_workers, pin_memory=pin_memory,
-        persistent_workers=_persistent
+        persistent_workers=_persistent, drop_last=True
     )
     testloader = DataLoader(
         testset, batch_size=batch_size, shuffle=False,
         num_workers=num_workers, pin_memory=pin_memory,
-        persistent_workers=_persistent
+        persistent_workers=_persistent, drop_last=True
     )
 
     return trainloader, testloader

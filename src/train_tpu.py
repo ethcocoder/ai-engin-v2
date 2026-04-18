@@ -22,6 +22,10 @@ try:
     # Force PJRT to ignore clusters and focus on local hardware
     os.environ['PJRT_DEVICE'] = 'TPU'
     os.environ['XRT_TPU_CONFIG'] = "localservice;0;localhost:51011"
+    
+    # --- Paradox Speed Boost (2x Multiply) ---
+    os.environ['XLA_USE_BF16'] = '1'
+    
     TPU_AVAILABLE = True
 except ImportError:
     TPU_AVAILABLE = False
