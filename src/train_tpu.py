@@ -11,6 +11,7 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 # --- TPU v5e Direct Activation ---
 try:
@@ -32,7 +33,7 @@ from train import PerceptualLoss, ssim_loss
 def train_tpu_direct(flags):
     """Direct-attached training loop for v5e-1."""
     device = xm.xla_device()
-    print(f"[*] Paradox Sovereign v5e Engine Activated on {device}")
+    print(f"[*] Paradox Sovereign v5e Engine Activated on {device}", flush=True)
 
     # 1. Pipeline Acquisition
     trainloader, _ = get_dataloaders(
@@ -41,24 +42,28 @@ def train_tpu_direct(flags):
         sample_limit=flags['sample_limit']
     )
     
-    # Paradox Parallel Loader (The secret to v5e speed)
-    train_device_loader = pl.ParallelLoader(trainloader, [device]).per_device_loader(device)
-
     # 2. Neural Manifold Initialization
     model = LatentGenesisCore(latent_channels=flags['latent_channels']).to(device)
     optimizer = optim.Adam(model.parameters(), lr=flags['lr'])
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=flags['epochs'])
     perc_engine = PerceptualLoss().to(device).eval()
     
-    # 3. Phase 3 Synthesis (40dB Apex)
+    # 3. Training Loop
     for epoch in range(flags['epochs']):
         model.train()
+        
+        # --- Paradox Stream Refresh ---
+        train_device_loader = pl.ParallelLoader(trainloader, [device]).per_device_loader(device)
+        
+        # Professional Progress Bar
+        pbar = tqdm(total=len(trainloader), desc=f"Epoch {epoch+1}/{flags['epochs']}", unit="batch")
+        
         for i, (images, _) in enumerate(train_device_loader):
             optimizer.zero_grad()
             
             recon, mu, logvar = model(images)
             
-            # High-Precision Loss (Phase 3 Calibration)
+            # Loss Synthesis
             l1_l = F.l1_loss(recon, images)
             s_l  = ssim_loss(recon, images)
             p_l  = perc_engine(recon, images)
@@ -66,17 +71,18 @@ def train_tpu_direct(flags):
             logvar_c = torch.clamp(logvar, -10, 10)
             kld_l = -0.5 * torch.mean(1 + logvar_c - mu.pow(2) - logvar_c.exp())
             
-            # Bedrock Accuracy Focus
-            loss = (l1_l * 20.0) + (s_l * 0.1) + (p_l * 0.05) + (kld_l * 0.0001)
+            # Calibration: Stability-First L1 Anchor
+            loss = (l1_l * 10.0) + (s_l * 0.05) + (p_l * 0.01) + (kld_l * 0.0001)
             
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             xm.optimizer_step(optimizer)
             
-            if i % 20 == 0:
-                print(f"Epoch [{epoch+1}/{flags['epochs']}] | Batch {i} | Loss: {loss.item():.4f} | LR: {scheduler.get_last_lr()[0]:.6f}", flush=True)
+            # Real-time Telemetry
+            pbar.set_postfix(loss=f"{loss.item():.4f}", lr=f"{scheduler.get_last_lr()[0]:.6f}")
+            pbar.update(1)
 
-        # Learning Rate Cooling
+        pbar.close()
         scheduler.step()
 
         # Sync Master Weights
@@ -90,11 +96,12 @@ def train_tpu_direct(flags):
 
 if __name__ == "__main__":
     if TPU_AVAILABLE:
+        # TEST-FLIGHT CONFIGURATION
         flags = {
-            'batch_size': 64,
-            'epochs': 200,
+            'batch_size': 32,
+            'epochs': 100,
             'lr': 2e-4,
-            'latent_channels': 32,
-            'sample_limit': 50000
+            'latent_channels': 16,
+            'sample_limit': 10000
         }
         train_tpu_direct(flags)
