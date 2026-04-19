@@ -49,12 +49,20 @@ Once the foundation is built, run this module to download **DIV2K High-Resolutio
 
 ---
 
-## 🎯 Step 3: Reality Synthesis Check
-The ultimate validation. Test the Engine on **4 Fresh Random HD images** it has never encountered.
-
+## 🎯 Step 3: Train Team B (The Hallucinator)
+Once Team A (The Sender) is successfully built, train the Super-Resolution engine that lives on the Receiver side to instantly sharpen incoming blurry inputs back to reality.
 ```bash
-# Run the Synthesis Test on Random Internet Samples (Using the TPU-Trained Apex Model)
-!python src/demo_hd.py --model_path checkpoints/universal_tpu_master.pth --latent_channels 64 --random
+# Trains Team B to sharpen Team A's 4KB transmission 
+!python src/receiver_enhancer.py --mode train --epochs 20
+```
+
+---
+
+## 🚀 Step 4: Full Pipeline Test (Sender + Receiver)
+The ultimate validation. Test the exact Teamwork loop on a fresh internet image.
+Watch it compress to 4KB (Team A), and instantly upscale to crisp 40dB perfection (Team B).
+```bash
+!python src/receiver_enhancer.py --mode demo
 ```
 
 ---
@@ -62,7 +70,7 @@ The ultimate validation. Test the Engine on **4 Fresh Random HD images** it has 
 ## 🛡️ Elite Performance Metrics
 | Advantage | Neural Feature | Real-World Impact |
 |---|---|---|
-| **Elite Reduction** | 4-Stage 12x Folding | Transmit 64-channel HD reliably |
+| **Elite Reduction** | 4-Stage 48x Folding | Transmit 4KB Team Payload reliably |
 | **P2P Ready** | Sovereign Quantization | Encrypted neural transfer via `.pdox` packets |
 | **Universal** | STL-10 Pattern Learning | Compresses any image, anywhere, anytime |
 | **Retina-Grade** | VGG + MS-SSIM Loss | Reconstructs textures, not just pixels |
