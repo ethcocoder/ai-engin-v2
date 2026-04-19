@@ -70,7 +70,7 @@ class RRDB(nn.Module):
 
 class EliteHallucinator(nn.Module):
     """The Ultimate 25MB+ Team B Generator"""
-    def __init__(self, in_channels=3, out_channels=3, nf=64, nb=12): # 12 RRDB Blocks!
+    def __init__(self, in_channels=3, out_channels=3, nf=64, nb=6): # Reduced to 6 for T4 VRAM safety
         super().__init__()
         self.conv_first = nn.Conv2d(in_channels, nf, 3, 1, 1)
         self.RRDB_trunk = nn.Sequential(*[RRDB(nf, 32) for _ in range(nb)])
@@ -234,7 +234,7 @@ if __name__ == "__main__":
     parser.add_argument('--sender_path', type=str, default='checkpoints/universal_tpu_master.pth')
     parser.add_argument('--receiver_path', type=str, default='checkpoints/elite_enhancer.pth')
     parser.add_argument('--data_dir', type=str, default='hd_finetune_data')
-    parser.add_argument('--batch_size', type=int, default=8) # Lowered because RRDB takes memory!
+    parser.add_argument('--batch_size', type=int, default=2) # Locked to 2 for Colab T4 GPU VRAM limits
     parser.add_argument('--epochs', type=int, default=100) # Full GAN training takes time
     parser.add_argument('--lr', type=float, default=1e-4) 
     args = parser.parse_args()
