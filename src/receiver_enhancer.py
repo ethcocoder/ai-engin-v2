@@ -199,7 +199,7 @@ def test_elite(args):
     sender_model.load_state_dict(torch.load(args.sender_path, map_location=device)['model_state_dict'])
     sender_model.eval()
 
-    receiver_model = EliteHallucinator().to(device)
+    receiver_model = EliteHallucinator(nb=args.nb).to(device)
     receiver_model.load_state_dict(torch.load(args.receiver_path, map_location=device)['model_state_dict'])
     receiver_model.eval()
 
@@ -235,6 +235,7 @@ if __name__ == "__main__":
     parser.add_argument('--receiver_path', type=str, default='checkpoints/elite_enhancer.pth')
     parser.add_argument('--data_dir', type=str, default='hd_finetune_data')
     parser.add_argument('--batch_size', type=int, default=2) # Locked to 2 for Colab T4 GPU VRAM limits
+    parser.add_argument('--nb', type=int, default=6) # 6 for T4 safely, 12 for TPU
     parser.add_argument('--epochs', type=int, default=100) # Full GAN training takes time
     parser.add_argument('--lr', type=float, default=1e-4) 
     args = parser.parse_args()
