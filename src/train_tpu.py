@@ -103,9 +103,9 @@ if __name__ == "__main__":
         # TEST-FLIGHT CONFIGURATION
         flags = {
             'batch_size': 32,
-            'epochs': 100,
+            'epochs': 20, # Efficient 20-epoch cycle for 16KB speed
             'lr': 1e-4,
-            'latent_channels': 16, # Locked at 16 (4KB) for max Team Architecture transmission speed
+            'latent_channels': 64, # Upgraded to 64 (16KB) for Sovereign High-Fidelity transmission
             'sample_limit': 10000
         }
         train_tpu_direct(flags)

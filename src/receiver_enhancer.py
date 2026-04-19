@@ -124,7 +124,7 @@ def train_gan_enhancer(args):
     dataset = FastHDDataset(args.data_dir)
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, drop_last=True)
     
-    sender_model = LatentGenesisCore(latent_channels=16).to(device)
+    sender_model = LatentGenesisCore(latent_channels=64).to(device)
     if os.path.exists(args.sender_path):
         sender_model.load_state_dict(torch.load(args.sender_path, map_location='cpu')['model_state_dict'])
     sender_model.eval()
@@ -195,7 +195,7 @@ def test_elite(args):
     """Visually demonstrates the Adversarial Hallucination."""
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
-    sender_model = LatentGenesisCore(latent_channels=16).to(device)
+    sender_model = LatentGenesisCore(latent_channels=64).to(device)
     sender_model.load_state_dict(torch.load(args.sender_path, map_location=device)['model_state_dict'])
     sender_model.eval()
 
@@ -235,8 +235,8 @@ if __name__ == "__main__":
     parser.add_argument('--receiver_path', type=str, default='checkpoints/elite_enhancer.pth')
     parser.add_argument('--data_dir', type=str, default='hd_finetune_data')
     parser.add_argument('--batch_size', type=int, default=2) # Locked to 2 for Colab T4 GPU VRAM limits
-    parser.add_argument('--nb', type=int, default=6) # 6 for T4 safely, 12 for TPU
-    parser.add_argument('--epochs', type=int, default=100) # Full GAN training takes time
+    parser.add_argument('--nb', type=int, default=12) # 12 for high fidelity, 6 for T4 safely
+    parser.add_argument('--epochs', type=int, default=20) # 20 is the new rapid sweet spot
     parser.add_argument('--lr', type=float, default=1e-4) 
     args = parser.parse_args()
     

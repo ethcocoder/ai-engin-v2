@@ -95,7 +95,7 @@ def run_reinforcement_finetune(args):
     )
     
     # 1. Load the Structurally Perfect Checkpoint
-    model = LatentGenesisCore(latent_channels=16).to(device)
+    model = LatentGenesisCore(latent_channels=64).to(device)
     if os.path.exists(args.checkpoint_path):
         print(f"[*] Loading foundation knowledge from {args.checkpoint_path}...")
         ckpt = torch.load(args.checkpoint_path, map_location='cpu')
