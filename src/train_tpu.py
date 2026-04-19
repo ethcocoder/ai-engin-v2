@@ -105,7 +105,7 @@ if __name__ == "__main__":
             'batch_size': 32,
             'epochs': 100,
             'lr': 1e-4,
-            'latent_channels': 16,
+            'latent_channels': 64, # Increased to 64 (16KB) for Retina-Grade sharp pipelines
             'sample_limit': 10000
         }
         train_tpu_direct(flags)

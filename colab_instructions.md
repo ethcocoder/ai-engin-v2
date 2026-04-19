@@ -54,7 +54,7 @@ The ultimate validation. Test the Engine on **4 Fresh Random HD images** it has 
 
 ```bash
 # Run the Synthesis Test on Random Internet Samples (Using the TPU-Trained Apex Model)
-!python src/demo_hd.py --model_path checkpoints/universal_tpu_master.pth --latent_channels 16 --random
+!python src/demo_hd.py --model_path checkpoints/universal_tpu_master.pth --latent_channels 64 --random
 ```
 
 ---
@@ -62,7 +62,7 @@ The ultimate validation. Test the Engine on **4 Fresh Random HD images** it has 
 ## 🛡️ Elite Performance Metrics
 | Advantage | Neural Feature | Real-World Impact |
 |---|---|---|
-| **98% Profit** | 4-Stage 16x Folding | Transmit HD over 2G/Satellite signals |
+| **Elite Reduction** | 4-Stage 12x Folding | Transmit 64-channel HD reliably |
 | **P2P Ready** | Sovereign Quantization | Encrypted neural transfer via `.pdox` packets |
 | **Universal** | STL-10 Pattern Learning | Compresses any image, anywhere, anytime |
 | **Retina-Grade** | VGG + MS-SSIM Loss | Reconstructs textures, not just pixels |
