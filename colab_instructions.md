@@ -44,8 +44,8 @@ Optimized for **TPU v2/v3/v5e**. This is the highest level of neural production,
 The ultimate validation. Test the Engine on **4 Fresh Random HD images** it has never encountered.
 
 ```bash
-# Run the Synthesis Test on Random Internet Samples
-!python src/demo_hd.py --model_path checkpoints/universal_genesis_core.pth --latent_channels 16 --random
+# Run the Synthesis Test on Random Internet Samples (Using the TPU-Trained Apex Model)
+!python src/demo_hd.py --model_path checkpoints/universal_tpu_master.pth --latent_channels 16 --random
 ```
 
 ---

@@ -72,10 +72,11 @@ def run_hd_simulation(args):
     # 3. Compression Logic (16x Spatial + 8-bit Q)
     original_bytes = 256 * 256 * 3
     with torch.no_grad():
-        mu, _ = model.encoder(images)
-        z_q = torch.round(torch.clamp(mu, -1, 1) * 127.5) / 127.5
-        payload_bytes = z_q.nelement() * 1
-        reconstructed = model.decoder(z_q)
+        # Bypass manual hard-clipping and use the model's native full-spectrum pass
+        reconstructed, mu, _ = model(images)
+        
+        # Calculate theoretical transmission size based on the latent bottleneck
+        payload_bytes = mu.nelement() * 1
 
     compression_ratio = original_bytes / (payload_bytes / images.shape[0])
     
