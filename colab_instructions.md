@@ -40,6 +40,15 @@ Optimized for **TPU v2/v3/v5e**. This is the highest level of neural production,
 
 ---
 
+### Phase 2.5: Retina-Grade Reinforcement (Texture Fine-Tuning)
+Once the foundation is built, run this module to download **DIV2K High-Resolution** data and teach the model razor-sharp edge textures without destroying its structural mapping.
+```bash
+# Downloads 800 HD images and fine-tunes the TPU Master for 20 Epochs
+!python src/finetune_tpu.py --epochs 20 --batch_size 16
+```
+
+---
+
 ## 🎯 Step 3: Reality Synthesis Check
 The ultimate validation. Test the Engine on **4 Fresh Random HD images** it has never encountered.
 
