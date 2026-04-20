@@ -1,12 +1,12 @@
 """
-receiver_enhancer.py — Paradox ESRGAN (Team B Elite Hallucinator)
-================================================================
+receiver_enhancer.py — Paradox ESRGAN (Team B - TPU Pure Stability Rebuild)
+==========================================================================
 State-of-the-Art Adversarial Super Resolution Engine.
-Rebuilt from the ground up for TPU/BF16 stability.
+Rebuilt from scratch to eliminate XLA/BF16 NaN crashes with mathematically safe layers.
 """
 
 import os
-# --- CRITICAL FIX: Kill lingering BF16 environment variables from the previous script ---
+# Ensure TPUs behave deterministically regarding precision downcasting
 os.environ['XLA_USE_BF16'] = '0'
 os.environ['XLA_DOWNCAST_BF16'] = '0'
 
@@ -26,9 +26,18 @@ from model import LatentGenesisCore
 from finetune_tpu import FastHDDataset, download_div2k
 import torchvision.models as models
 
-# --- Safe Perceptual Loss for BF16 ---
+# --- TPU Integration ---
+try:
+    import torch_xla
+    import torch_xla.core.xla_model as xm
+    import torch_xla.distributed.parallel_loader as pl
+    TPU_AVAILABLE = 'PJRT_DEVICE' in os.environ or 'TPU_NAME' in os.environ
+except ImportError:
+    TPU_AVAILABLE = False
+
+
 class SafePerceptualLoss(nn.Module):
-    """Uses L1 instead of MSE to mathematically prevent BF16 squaring overflow"""
+    """Uses L1 to inherently prevent BF16 squaring overflow."""
     def __init__(self):
         super().__init__()
         vgg = models.vgg16(weights=models.VGG16_Weights.IMAGENET1K_V1).features
@@ -48,115 +57,98 @@ class SafePerceptualLoss(nn.Module):
         x_f2, y_f2 = self.slice2(x_f1), self.slice2(y_f1)
         x_f3, y_f3 = self.slice3(x_f2), self.slice3(y_f2)
         
-        # CRITICAL: L1 Loss does not square. 
-        # MSE squares numbers. In BF16, a difference of 256 squared is 65536 -> NaN!
         return F.l1_loss(x_f1, y_f1) + F.l1_loss(x_f2, y_f2) + F.l1_loss(x_f3, y_f3)
 
 
-# --- TPU Integration ---
-try:
-    import torch_xla
-    import torch_xla.core.xla_model as xm
-    import torch_xla.distributed.parallel_loader as pl
-    TPU_AVAILABLE = 'PJRT_DEVICE' in os.environ or 'TPU_NAME' in os.environ
-except ImportError:
-    TPU_AVAILABLE = False
-
-
 # =====================================================================
-# 1. ELITE GENERATOR (BF16 & TPU Stabilized)
+# 1. ELITE GENERATOR: Pure ESRGAN (No Normalizations for Stability)
 # =====================================================================
-class StableDenseBlock(nn.Module):
-    """Dense Block with InstanceNorm -> Required for BF16 stability without pretraining"""
-    def __init__(self, channels=64, growth=32):
+class ResidualDenseBlock_5C(nn.Module):
+    """Dense Block without Normalizations—avoids TPU zero-variance crashes"""
+    def __init__(self, nf=64, gc=32):
         super().__init__()
-        def conv_layer(in_c, out_c):
-            return nn.Sequential(
-                nn.Conv2d(in_c, out_c, 3, 1, 1, bias=False),
-                nn.InstanceNorm2d(out_c),
-                nn.LeakyReLU(0.2, True)
-            )
-        self.conv1 = conv_layer(channels, growth)
-        self.conv2 = conv_layer(channels + growth, growth)
-        self.conv3 = conv_layer(channels + 2*growth, growth)
-        self.conv4 = conv_layer(channels + 3*growth, growth)
-        self.conv5 = nn.Conv2d(channels + 4*growth, channels, 3, 1, 1)
+        self.conv1 = nn.Conv2d(nf, gc, 3, 1, 1, bias=True)
+        self.conv2 = nn.Conv2d(nf + gc, gc, 3, 1, 1, bias=True)
+        self.conv3 = nn.Conv2d(nf + 2 * gc, gc, 3, 1, 1, bias=True)
+        self.conv4 = nn.Conv2d(nf + 3 * gc, gc, 3, 1, 1, bias=True)
+        self.conv5 = nn.Conv2d(nf + 4 * gc, nf, 3, 1, 1, bias=True)
+        self.lrelu = nn.LeakyReLU(negative_slope=0.2, inplace=True)
 
     def forward(self, x):
-        x1 = self.conv1(x)
-        x2 = self.conv2(torch.cat((x, x1), 1))
-        x3 = self.conv3(torch.cat((x, x1, x2), 1))
-        x4 = self.conv4(torch.cat((x, x1, x2, x3), 1))
+        x1 = self.lrelu(self.conv1(x))
+        x2 = self.lrelu(self.conv2(torch.cat((x, x1), 1)))
+        x3 = self.lrelu(self.conv3(torch.cat((x, x1, x2), 1)))
+        x4 = self.lrelu(self.conv4(torch.cat((x, x1, x2, x3), 1)))
         x5 = self.conv5(torch.cat((x, x1, x2, x3, x4), 1))
-        return x5 * 0.2 + x # Residual scaling
+        return x5 * 0.2 + x
 
-class StableRRDB(nn.Module):
-    def __init__(self, channels=64, growth=32):
+class RRDB(nn.Module):
+    def __init__(self, nf=64, gc=32):
         super().__init__()
-        self.RDB1 = StableDenseBlock(channels, growth)
-        self.RDB2 = StableDenseBlock(channels, growth)
-        self.RDB3 = StableDenseBlock(channels, growth)
+        self.RDB1 = ResidualDenseBlock_5C(nf, gc)
+        self.RDB2 = ResidualDenseBlock_5C(nf, gc)
+        self.RDB3 = ResidualDenseBlock_5C(nf, gc)
 
     def forward(self, x):
         out = self.RDB1(x)
         out = self.RDB2(out)
         out = self.RDB3(out)
-        return out * 0.2 + x 
+        return out * 0.2 + x
 
 class EliteHallucinator(nn.Module):
-    """The Ultimate Team B Generator"""
-    def __init__(self, in_channels=3, out_channels=3, nf=64, nb=6):
+    def __init__(self, in_nc=3, out_nc=3, nf=64, nb=6):
         super().__init__()
-        self.conv_first = nn.Conv2d(in_channels, nf, 3, 1, 1)
-        self.RRDB_trunk = nn.Sequential(*[StableRRDB(nf, 32) for _ in range(nb)])
-        self.trunk_conv = nn.Conv2d(nf, nf, 3, 1, 1)
+        self.conv_first = nn.Conv2d(in_nc, nf, 3, 1, 1, bias=True)
+        self.RRDB_trunk = nn.Sequential(*[RRDB(nf=nf, gc=32) for _ in range(nb)])
+        self.trunk_conv = nn.Conv2d(nf, nf, 3, 1, 1, bias=True)
         self.conv_last = nn.Sequential(
-            nn.Conv2d(nf, nf, 3, 1, 1),
-            nn.LeakyReLU(0.2, True),
-            nn.Conv2d(nf, out_channels, 3, 1, 1)
+            nn.Conv2d(nf, nf, 3, 1, 1, bias=True),
+            nn.LeakyReLU(negative_slope=0.2, inplace=True),
+            nn.Conv2d(nf, out_nc, 3, 1, 1, bias=True)
         )
-        
-        # Zero-Init to start safe
-        nn.init.constant_(self.conv_last[-1].weight, 0)
-        nn.init.constant_(self.conv_last[-1].bias, 0)
+        self.scale = 0.1 # Heavily buffers the initial output against exploding
 
-    def forward(self, x_blurry):
-        feat = self.conv_first(x_blurry)
+    def forward(self, x):
+        feat = self.conv_first(x)
         trunk = self.trunk_conv(self.RRDB_trunk(feat))
         feat = feat + trunk
-        residual_details = self.conv_last(feat)
-        return torch.tanh(x_blurry + residual_details) 
+        residual = self.conv_last(feat)
+        return torch.tanh(x + residual * self.scale)
 
 
 # =====================================================================
-# 2. ELITE DISCRIMINATOR: Stable PatchGAN
+# 2. ELITE DISCRIMINATOR: GroupNorm Stabilized
 # =====================================================================
-class StablePatchDiscriminator(nn.Module):
+class StableDiscriminator(nn.Module):
+    """VGG style Discriminator utilizing GroupNorm to evade TPU NaN bugs."""
     def __init__(self, in_channels=3):
         super().__init__()
-        def block(in_feat, out_feat, normalize=True):
-            layers = [nn.utils.spectral_norm(nn.Conv2d(in_feat, out_feat, 4, stride=2, padding=1, bias=not normalize))]
-            if normalize: layers.append(nn.InstanceNorm2d(out_feat))
+        def block(in_feat, out_feat, stride=1, normalize=True):
+            layers = [nn.Conv2d(in_feat, out_feat, 3, stride=stride, padding=1, bias=not normalize)]
+            if normalize: 
+                # GroupNorm avoids Instance/Batch norm div-by-zero crashes perfectly
+                layers.append(nn.GroupNorm(8, out_feat, eps=1e-4))
             layers.append(nn.LeakyReLU(0.2, inplace=True))
             return layers
 
         self.model = nn.Sequential(
-            *block(in_channels, 64, normalize=False),
-            *block(64, 128),
-            *block(128, 256),
-            *block(256, 512),
-            nn.utils.spectral_norm(nn.Conv2d(512, 1, 3, 1, 1)) 
+            *block(in_channels, 64, stride=2, normalize=False),
+            *block(64, 128, stride=2),
+            *block(128, 256, stride=2),
+            *block(256, 512, stride=2),
+            nn.Conv2d(512, 1, 3, 1, 1) 
         )
 
     def forward(self, img):
         return self.model(img)
 
+
 # =====================================================================
 # 3. TRAINING ENGINE
 # =====================================================================
 def train_gan_enhancer(args):
-    device = xm.xla_device() if TPU_AVAILABLE else torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"[*] Igniting Elite GAN Training Protocol on {device}...")
+    device = torch_xla.device() if TPU_AVAILABLE else torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"[*] Igniting Rebuilt Elite GAN on {device}...")
 
     download_div2k(args.data_dir)
     dataset = FastHDDataset(args.data_dir)
@@ -169,14 +161,14 @@ def train_gan_enhancer(args):
     for param in sender_model.parameters(): param.requires_grad = False
 
     netG = EliteHallucinator(nb=args.nb).to(device)
-    netD = StablePatchDiscriminator().to(device)
+    netD = StableDiscriminator().to(device)
     
-    # CRITICAL BF16 FIX: eps=1e-4 prevents Adam division by zero underflow on TPUs!
-    optG = optim.Adam(netG.parameters(), lr=args.lr, betas=(0.9, 0.999), eps=1e-4)
-    optD = optim.Adam(netD.parameters(), lr=args.lr, betas=(0.9, 0.999), eps=1e-4)
+    # eps=1e-4 crucial for BF16/TPU numerical limits
+    optG = optim.Adam(netG.parameters(), lr=args.lr, betas=(0.5, 0.999), eps=1e-4)
+    optD = optim.Adam(netD.parameters(), lr=args.lr, betas=(0.5, 0.999), eps=1e-4)
     
     perc_engine = SafePerceptualLoss().to(device).eval()
-    criterion_gan = nn.BCEWithLogitsLoss() # LogSumExp prevents BF16 squaring overflow
+    criterion_gan = nn.BCEWithLogitsLoss()
 
     for epoch in range(args.epochs):
         netG.train(); netD.train()
@@ -189,40 +181,43 @@ def train_gan_enhancer(args):
             with torch.no_grad():
                 blurry_base, _, _ = sender_model(real_imgs)
             
-            # --- 1. Train Discriminator ---
+            # --- Train Discriminator ---
             optD.zero_grad()
             fake_imgs = netG(blurry_base)
             
             pred_real = netD(real_imgs)
             pred_fake = netD(fake_imgs.detach())
             
-            loss_D_real = criterion_gan(pred_real, torch.ones_like(pred_real))
-            loss_D_fake = criterion_gan(pred_fake, torch.zeros_like(pred_fake))
+            # Label smoothing real labels to 0.9 to prevent discriminator over-confidence
+            target_real = torch.full_like(pred_real, 0.9)
+            target_fake = torch.zeros_like(pred_fake)
+            
+            loss_D_real = criterion_gan(pred_real, target_real)
+            loss_D_fake = criterion_gan(pred_fake, target_fake)
             loss_D = (loss_D_real + loss_D_fake) / 2
             
             loss_D.backward()
-            nn.utils.clip_grad_norm_(netD.parameters(), max_norm=1.0)
+            nn.utils.clip_grad_norm_(netD.parameters(), max_norm=0.5)
             
             if TPU_AVAILABLE: xm.optimizer_step(optD)
             else: optD.step()
 
-            # --- 2. Train Generator ---
+            # --- Train Generator ---
             optG.zero_grad()
             
-            # Regenerate images to keep XLA graph clean
             fake_imgs_for_G = netG(blurry_base) 
             pred_fake_for_G = netD(fake_imgs_for_G) 
             
-            # Losses
-            loss_G_adv = criterion_gan(pred_fake_for_G, torch.ones_like(pred_fake_for_G))
+            target_real_G = torch.ones_like(pred_fake_for_G)
+            
+            loss_G_adv = criterion_gan(pred_fake_for_G, target_real_G)
             loss_G_perc = perc_engine(fake_imgs_for_G, real_imgs)
             loss_G_l1 = F.l1_loss(fake_imgs_for_G, real_imgs)
             
-            # G needs a heavy L1 anchor initially to avoid exploding
             loss_G = (loss_G_l1 * 10.0) + (loss_G_perc * 0.1) + (loss_G_adv * 0.1)
             
             loss_G.backward()
-            nn.utils.clip_grad_norm_(netG.parameters(), max_norm=1.0)
+            nn.utils.clip_grad_norm_(netG.parameters(), max_norm=0.5)
             
             if TPU_AVAILABLE: xm.optimizer_step(optG)
             else: optG.step()
@@ -280,9 +275,9 @@ if __name__ == "__main__":
     parser.add_argument('--receiver_path', type=str, default='checkpoints/elite_enhancer.pth')
     parser.add_argument('--data_dir', type=str, default='hd_finetune_data')
     parser.add_argument('--batch_size', type=int, default=2) 
-    parser.add_argument('--nb', type=int, default=6) # Safe memory limit
+    parser.add_argument('--nb', type=int, default=6) 
     parser.add_argument('--epochs', type=int, default=20) 
-    parser.add_argument('--lr', type=float, default=1e-4) # Higher LR supported now
+    parser.add_argument('--lr', type=float, default=1e-4) 
     args = parser.parse_args()
     
     if args.mode == 'train':
