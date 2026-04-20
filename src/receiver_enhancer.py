@@ -97,7 +97,8 @@ class VGGDiscriminator(nn.Module):
     def __init__(self, in_channels=3):
         super().__init__()
         def block(in_feat, out_feat, normalize=True):
-            layers = [nn.Conv2d(in_feat, out_feat, 3, stride=2, padding=1)]
+            # Using spectral_norm for extreme stability on TPU
+            layers = [nn.utils.spectral_norm(nn.Conv2d(in_feat, out_feat, 3, stride=2, padding=1))]
             if normalize: layers.append(nn.BatchNorm2d(out_feat))
             layers.append(nn.LeakyReLU(0.2, inplace=True))
             return layers
@@ -107,7 +108,7 @@ class VGGDiscriminator(nn.Module):
             *block(64, 128),
             *block(128, 256),
             *block(256, 512),
-            nn.Conv2d(512, 1, 3, 1, 1) # Single output map rating reality vs fake
+            nn.utils.spectral_norm(nn.Conv2d(512, 1, 3, 1, 1)) # Single output map rating reality vs fake
         )
 
     def forward(self, img):
@@ -157,11 +158,14 @@ def train_gan_enhancer(args):
             pred_real = netD(real_imgs)
             pred_fake = netD(fake_imgs.detach())
             
-            loss_D_real = criterion_gan(pred_real, torch.ones_like(pred_real))
+            # Label Smoothing (0.9 instead of 1.0) prevents the D from being too 'sharp' and breaking the G
+            loss_D_real = criterion_gan(pred_real, torch.full_like(pred_real, 0.9))
             loss_D_fake = criterion_gan(pred_fake, torch.zeros_like(pred_fake))
             loss_D = (loss_D_real + loss_D_fake) / 2
             
             loss_D.backward()
+            nn.utils.clip_grad_norm_(netD.parameters(), max_norm=1.0) # Stability Guard
+            
             if TPU_AVAILABLE: xm.optimizer_step(optD)
             else: optD.step()
 
@@ -180,6 +184,8 @@ def train_gan_enhancer(args):
             loss_G = (loss_G_l1 * 1.0) + (loss_G_perc * 0.1) + (loss_G_adv * 0.005)
             
             loss_G.backward()
+            nn.utils.clip_grad_norm_(netG.parameters(), max_norm=1.0) # Stability Guard
+            
             if TPU_AVAILABLE: xm.optimizer_step(optG)
             else: optG.step()
             
@@ -237,7 +243,7 @@ if __name__ == "__main__":
     parser.add_argument('--batch_size', type=int, default=2) # Locked to 2 for Colab T4 GPU VRAM limits
     parser.add_argument('--nb', type=int, default=12) # 12 for high fidelity, 6 for T4 safely
     parser.add_argument('--epochs', type=int, default=20) # 20 is the new rapid sweet spot
-    parser.add_argument('--lr', type=float, default=1e-4) 
+    parser.add_argument('--lr', type=float, default=2e-5) 
     args = parser.parse_args()
     
     if args.mode == 'train':
