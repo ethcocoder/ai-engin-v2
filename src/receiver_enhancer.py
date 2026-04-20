@@ -113,7 +113,10 @@ class EliteHallucinator(nn.Module):
         trunk = self.trunk_conv(self.RRDB_trunk(feat))
         feat = feat + trunk
         residual = self.conv_last(feat)
-        return torch.tanh(x + residual * self.scale)
+        # CRITICAL FIX: Removed tanh(x+res). Tanh squashed the pre-normalized [-1,1] image by 24% immediately, 
+        # destroying all contrast and forcing the network to learn to fight itself to reach pure black/white!
+        # Gradients were dying in the tanh asymptotes. Clamp is the mathematically correct bounding.
+        return torch.clamp(x + residual * self.scale, -1.0, 1.0)
 
 
 # =====================================================================
@@ -214,7 +217,11 @@ def train_gan_enhancer(args):
             loss_G_perc = perc_engine(fake_imgs_for_G, real_imgs)
             loss_G_l1 = F.l1_loss(fake_imgs_for_G, real_imgs)
             
-            loss_G = (loss_G_l1 * 10.0) + (loss_G_perc * 0.1) + (loss_G_adv * 0.1)
+            # CRITICAL FIX: The Generator accurately identified semantic boundary lines (objects), 
+            # but 'cheated' by drawing thick neon 'worms' to hack the deep VGG features. 
+            # We must drastically scale down the Perceptual and Adv weights to stop this hallucination, 
+            # forcing it to rely on L1 (pixel accuracy) to draw true micro-edges.
+            loss_G = (loss_G_l1 * 50.0) + (loss_G_perc * 0.01) + (loss_G_adv * 0.005)
             
             loss_G.backward()
             nn.utils.clip_grad_norm_(netG.parameters(), max_norm=0.5)
