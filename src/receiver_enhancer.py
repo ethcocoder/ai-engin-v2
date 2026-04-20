@@ -135,7 +135,7 @@ class StablePatchDiscriminator(nn.Module):
     def __init__(self, in_channels=3):
         super().__init__()
         def block(in_feat, out_feat, normalize=True):
-            layers = [nn.Conv2d(in_feat, out_feat, 4, stride=2, padding=1, bias=not normalize)]
+            layers = [nn.utils.spectral_norm(nn.Conv2d(in_feat, out_feat, 4, stride=2, padding=1, bias=not normalize))]
             if normalize: layers.append(nn.InstanceNorm2d(out_feat))
             layers.append(nn.LeakyReLU(0.2, inplace=True))
             return layers
@@ -145,7 +145,7 @@ class StablePatchDiscriminator(nn.Module):
             *block(64, 128),
             *block(128, 256),
             *block(256, 512),
-            nn.Conv2d(512, 1, 3, 1, 1) 
+            nn.utils.spectral_norm(nn.Conv2d(512, 1, 3, 1, 1)) 
         )
 
     def forward(self, img):
@@ -176,7 +176,7 @@ def train_gan_enhancer(args):
     optD = optim.Adam(netD.parameters(), lr=args.lr, betas=(0.9, 0.999), eps=1e-4)
     
     perc_engine = SafePerceptualLoss().to(device).eval()
-    criterion_gan = nn.MSELoss() # LSGAN is perfectly stable
+    criterion_gan = nn.BCEWithLogitsLoss() # LogSumExp prevents BF16 squaring overflow
 
     for epoch in range(args.epochs):
         netG.train(); netD.train()
@@ -215,7 +215,7 @@ def train_gan_enhancer(args):
             
             # Losses
             loss_G_adv = criterion_gan(pred_fake_for_G, torch.ones_like(pred_fake_for_G))
-            loss_G_perc = torch.clamp(perc_engine(fake_imgs_for_G, real_imgs), 0, 100)
+            loss_G_perc = perc_engine(fake_imgs_for_G, real_imgs)
             loss_G_l1 = F.l1_loss(fake_imgs_for_G, real_imgs)
             
             # G needs a heavy L1 anchor initially to avoid exploding
@@ -227,7 +227,7 @@ def train_gan_enhancer(args):
             if TPU_AVAILABLE: xm.optimizer_step(optG)
             else: optG.step()
             
-            if TPU_AVAILABLE: xm.mark_step() 
+            if TPU_AVAILABLE: torch_xla.sync() 
             
             pbar.set_postfix(D=f"{loss_D.item():.3f}", G=f"{loss_G.item():.3f}")
             pbar.update(1)
