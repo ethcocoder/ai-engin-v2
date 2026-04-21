@@ -74,7 +74,7 @@ def _gaussian_window(size: int = 11, sigma: float = 1.5) -> torch.Tensor:
 
 _ssim_window_cache = {}
 
-def ssim_loss(x, y, window_size: int = 11):
+def ssim_loss(x, y, window_size: int = 11, reduction: str = 'mean'):
     C_ch = x.shape[1]
     device = x.device
     
@@ -102,7 +102,10 @@ def ssim_loss(x, y, window_size: int = 11):
     denominator = torch.clamp((mu_x**2 + mu_y**2 + C1) * (sig_xx + sig_yy + C2), min=1e-8)
     ssim_map = ((2 * mu_x * mu_y + C1) * (2 * sig_xy + C2)) / denominator
     
-    return 1.0 - ssim_map.mean()
+    loss_map = 1.0 - ssim_map
+    if reduction == 'mean':
+        return loss_map.mean()
+    return loss_map
 
 
 # ── Master Compression Loss ──────────────────────────────────────────────────

@@ -68,20 +68,25 @@ def train_tpu_direct(flags):
             
             recon, mu, logvar = model(images)
             
-            # --- THE BEYOND PERFECT FORMULA (Feature-Only focus) ---
-            # We de-prioritize L1 almost entirely (set to 0.1).
-            # This tells the AI: 'I don't care about exact pixel colors, I care about SHAPES and CONCEPTS.'
-            l1_l = F.l1_loss(recon, images)
-            s_l  = ssim_loss(recon, images)
-            p_l  = perc_engine(recon, images)
+            # --- THE BEYOND PERFECT FORMULA (Bio-Inspired) ---
+            l1_l = F.l1_loss(recon, images, reduction='none')
+            s_l_map = ssim_loss(recon, images, reduction='none') # Need ssim_loss to return map
+            p_l = perc_engine(recon, images)
+            
+            # BIO-INSPIRED: FOVEATED SALIENCY MASK
+            # We prioritize the center of the image where the human eye focus is highest.
+            h, w = images.shape[2], images.shape[3]
+            grid_y, grid_x = torch.meshgrid(torch.linspace(-1, 1, h), torch.linspace(-1, 1, w), indexing='ij')
+            fovea_mask = torch.exp(-(grid_x.pow(2) + grid_y.pow(2)) / 0.5).to(images.device).unsqueeze(0).unsqueeze(0)
+            
+            # Weighted losses
+            l1_l = (l1_l * fovea_mask).mean()
+            s_l  = (s_l_map * fovea_mask).mean() if hasattr(s_l_map, 'mean') else s_l_map
             
             # KLD (Clamped for stability)
             kld_l = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
             
             # Feature-Centric Ratio:
-            # - Pixel (0.1): Minimal structural anchor.
-            # - SSIM (20.0): Extreme geometry focus.
-            # - Perc (5.0): Deep texture intelligence.
             loss = (l1_l * 0.1) + (s_l * 20.0) + (p_l * 5.0) + (kld_l * 0.0005)
             
             loss.backward()

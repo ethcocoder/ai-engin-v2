@@ -136,6 +136,13 @@ class FastAttentionBlock(nn.Module):
     def forward(self, x):
         res = self.lrelu(self.conv1(x))
         
+        # BIO-INSPIRED: LATERAL INHIBITION
+        # Mimics the human eye's edge-enhancement by inhibiting 
+        # neighboring pixels (High-Pass Filtering).
+        # This creates 'Biological Sharpness'.
+        blurred = F.avg_pool2d(res, kernel_size=3, stride=1, padding=1)
+        res = res + (res - blurred) * 0.5 # Sharpening boost
+        
         # QUANTUM-STOCHASTIC SUPERPOSITION:
         # We use the QVS to peek into the 16KB space by running 
         # trajectory simulations natively on the target device.
