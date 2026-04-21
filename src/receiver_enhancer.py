@@ -33,6 +33,59 @@ except ImportError:
     TPU_AVAILABLE = False
 
 
+class SovereignAntiGridEngine(nn.Module):
+    """
+    Sovereign Anti-Grid Engine (SAGE)
+    Eliminates neural checkerboarding and coordinate-like artifacts.
+    """
+    def __init__(self):
+        super().__init__()
+        # 5x5 Gaussian Kernel to neutralize grid spikes
+        kernel = torch.tensor([[1, 4, 6, 4, 1],
+                               [4,16,24,16, 4],
+                               [6,24,36,24, 6],
+                               [4,16,24,16, 4],
+                               [1, 4, 6, 4, 1]], dtype=torch.float32) / 256.0
+        self.register_buffer('kernel', kernel.view(1, 1, 5, 5))
+
+    def forward(self, x):
+        # Multi-channel Gaussian Blur
+        c = x.shape[1]
+        blurred = F.conv2d(x, self.kernel.expand(c, 1, 5, 5), padding=2, groups=c)
+        # We penalize the difference between the image and its blurred version 
+        # specifically in high-frequency 'grid' regions.
+        return blurred
+
+class SovereignAestheticEngine(nn.Module):
+    """
+    Advanced Chromatic & Structural Engine.
+    Handles: Luminance, Contrast, Color Temperature, and Smoothness.
+    """
+    def __init__(self):
+        super().__init__()
+        self.mse = nn.MSELoss()
+
+    def forward(self, fake, real):
+        # 1. Luminance & Contrast (Light/Shadow)
+        fake_l = fake.mean(dim=1, keepdim=True)
+        real_l = real.mean(dim=1, keepdim=True)
+        loss_lum = self.mse(fake_l, real_l)
+        loss_con = self.mse(torch.std(fake_l, dim=(2,3)), torch.std(real_l, dim=(2,3)))
+        
+        # 2. Chromatic Temperature (Color Balance)
+        # We match the mean and variance of each RGB channel independently
+        fake_color_mean = fake.mean(dim=(2,3))
+        real_color_mean = real.mean(dim=(2,3))
+        loss_temp = self.mse(fake_color_mean, real_color_mean)
+        
+        # 3. Structural Smoothness (Total Variation)
+        # Reduces 'Neural Grain' in flats (like skies)
+        diff_h = torch.abs(fake[:, :, 1:, :] - fake[:, :, :-1, :]).mean()
+        diff_w = torch.abs(fake[:, :, :, 1:] - fake[:, :, :, :-1]).mean()
+        loss_tv = diff_h + diff_w
+        
+        return loss_lum + loss_con + (loss_temp * 5.0) + (loss_tv * 0.1)
+
 class EliteFeatureEngine(nn.Module):
     """
     Hyper-Effective Feature Trainer. 
@@ -199,14 +252,16 @@ class StableDiscriminator(nn.Module):
 # =====================================================================
 # 3. TRAINING ENGINE
 # =====================================================================
-def train_gan_enhancer(args):
+def train_gan_enhancer(args, is_finetune=False):
     device = torch_xla.device() if TPU_AVAILABLE else torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"[*] Igniting Bespoke Elite GAN on {device}...")
+    phase_name = "REINFORCEMENT (Finetune)" if is_finetune else "IGNITION (Train)"
+    print(f"[*] Starting {phase_name} Phase on {device}...")
 
     download_div2k(args.data_dir)
     dataset = FastHDDataset(args.data_dir)
-    # SPEED BOOST: Use 8 workers to feed images to TPU.
-    loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, drop_last=True, num_workers=8)
+    # Use smaller batch for finetune to increase stochastic detail
+    bs = args.batch_size // 2 if is_finetune else args.batch_size
+    loader = DataLoader(dataset, batch_size=bs, shuffle=True, drop_last=True, num_workers=8)
     
     sender_model = LatentGenesisCore(latent_channels=64).to(device)
     if os.path.exists(args.sender_path):
@@ -217,25 +272,40 @@ def train_gan_enhancer(args):
     netG = EliteHallucinator(nb=args.nb).to(device)
     netD = StableDiscriminator().to(device)
     
-    # UNCHAINED LR: Generator boosted to learn 2x faster in the 20 epoch sprint.
-    optG = optim.Adam(netG.parameters(), lr=args.lr * 2.0, betas=(0.5, 0.999), eps=1e-4)
-    optD = optim.Adam(netD.parameters(), lr=args.lr, betas=(0.5, 0.999), eps=1e-4)
+    # Load existing Enhancer weights if finetuning
+    if is_finetune and os.path.exists(args.receiver_path):
+        print(f"[*] Loading pre-trained Enhancer: {args.receiver_path}")
+        netG.load_state_dict(torch.load(args.receiver_path, map_location='cpu')['model_state_dict'])
+
+    # ── SOVEREIGN FINETUNE LEARNING RATE ─────────────────────────────────────
+    # Use 5x lower LR for finetune to prevent catastrophic forgetting
+    lr_g = (args.lr * 0.2) if is_finetune else (args.lr * 2.0)
+    lr_d = (args.lr * 0.1) if is_finetune else args.lr
+    
+    optG = optim.Adam(netG.parameters(), lr=lr_g, betas=(0.5, 0.999), eps=1e-4)
+    optD = optim.Adam(netD.parameters(), lr=lr_d, betas=(0.5, 0.999), eps=1e-4)
     
     feature_engine = EliteFeatureEngine().to(device).eval()
     hf_engine = HighFrequencyEdgeLoss().to(device).eval()
+    aesthetic_engine = SovereignAestheticEngine().to(device).eval()
+    sage_engine = SovereignAntiGridEngine().to(device).eval()
     criterion_gan = nn.BCEWithLogitsLoss()
 
     for epoch in range(args.epochs):
         netG.train(); netD.train()
         train_loader = pl.ParallelLoader(loader, [device]).per_device_loader(device) if TPU_AVAILABLE else loader
-        pbar = tqdm(total=len(loader), desc=f"Elite GAN {epoch+1}/{args.epochs}")
+        pbar = tqdm(total=len(loader), desc=f"Elite {phase_name} {epoch+1}/{args.epochs}")
         
         for real_imgs, _ in train_loader:
             if not TPU_AVAILABLE: real_imgs = real_imgs.to(device)
             
             with torch.no_grad():
                 blurry_base, _, _ = sender_model(real_imgs)
-                       # --- HYPER-SPEED FORWARD ---
+                # --- SOVEREIGN SALIENCY ENGINE ---
+                gray_real = real_imgs.mean(dim=1, keepdim=True)
+                edge_mask = torch.abs(F.conv2d(gray_real, torch.tensor([[[[0,1,0],[1,-4,1],[0,1,0]]]], dtype=torch.float32, device=device), padding=1))
+                saliency = torch.clamp(edge_mask / (edge_mask.mean() + 1e-8), 0.1, 5.0)
+            
             fake_imgs = netG(blurry_base)
             
             # --- Train Discriminator ---
@@ -243,7 +313,6 @@ def train_gan_enhancer(args):
             pred_real_feats = netD(real_imgs)
             pred_fake_feats = netD(fake_imgs.detach())
             
-            # Predict only the last layer for standard GAN loss
             loss_D_real = criterion_gan(pred_real_feats[-1], torch.full_like(pred_real_feats[-1], 0.9))
             loss_D_fake = criterion_gan(pred_fake_feats[-1], torch.zeros_like(pred_fake_feats[-1]))
             loss_D = (loss_D_real + loss_D_fake) / 2
@@ -257,29 +326,34 @@ def train_gan_enhancer(args):
             # --- Train Generator ---
             optG.zero_grad()
             pred_fake_for_G_feats = netD(fake_imgs) 
-            pred_real_for_G_feats = netD(real_imgs) # For Feature Matching
+            pred_real_for_G_feats = netD(real_imgs)
             
-            # 1. Adversarial Loss (Last layer)
+            # 1. Adversarial Loss (BOOSTED for finetune)
+            adv_weight = 0.5 if is_finetune else 0.1
             loss_G_adv = criterion_gan(pred_fake_for_G_feats[-1], torch.ones_like(pred_fake_for_G_feats[-1]))
             
-            # 2. FEATURE MATCHING LOSS (Matching intermediate Discriminator features)
-            # This is 'Beyond Perfect' - the Generator learns the EXACT internal logic of the Discriminator.
+            # 2. FEATURE MATCHING 
             loss_fm = 0
             for f in range(len(pred_fake_for_G_feats) - 1):
                 loss_fm += F.l1_loss(pred_fake_for_G_feats[f], pred_real_for_G_feats[f].detach())
             
             loss_feat, loss_style = feature_engine(fake_imgs, real_imgs)
             loss_edge = hf_engine(fake_imgs, real_imgs)
-            loss_pixel = F.l1_loss(fake_imgs, real_imgs)
+            loss_vibe = aesthetic_engine(fake_imgs, real_imgs)
             
-            # THE BEYOND-PERFECT FEATURE FORMULA:
-            # - Pixel (0.1): Minimum anchor.
-            # - Feature (10.0): Deep semantics weight doubled.
-            # - Style (10.0): Texture weight.
-            # - Edge (5.0): Sharpness weight.
-            # - FM (5.0): Discriminator feature matching.
-            # - Adv (0.1): Realism driver.
-            loss_G = (loss_pixel * 0.1) + (loss_feat * 10.0) + (loss_style * 10.0) + (loss_edge * 5.0) + (loss_fm * 5.0) + (loss_G_adv * 0.1)
+            # --- SAGE: Anti-Grid Consistency ---
+            # Penalize any high-frequency 'coordinate spikes' that aren't in the original.
+            fake_sage = sage_engine(fake_imgs)
+            real_sage = sage_engine(real_imgs)
+            loss_sage = F.mse_loss(fake_sage, real_sage)
+            
+            # Saliency Weighting
+            loss_pixel = (F.l1_loss(fake_imgs, real_imgs, reduction='none') * saliency).mean()
+            
+            # BEYOND-PERFECT FORMULA
+            vibe_weight = 15.0 if is_finetune else 2.0
+            sage_weight = 50.0 if is_finetune else 5.0
+            loss_G = (loss_pixel * 0.1) + (loss_feat * 5.0) + (loss_style * 5.0) + (loss_edge * 10.0) + (loss_fm * 5.0) + (loss_G_adv * adv_weight) + (loss_vibe * vibe_weight) + (loss_sage * sage_weight)
             
             loss_G.backward()
             nn.utils.clip_grad_norm_(netG.parameters(), max_norm=0.5)
@@ -306,7 +380,8 @@ def test_elite(args):
     receiver_model.load_state_dict(torch.load(args.receiver_path, map_location=device)['model_state_dict'])
     receiver_model.eval()
 
-    url = f"https://picsum.photos/seed/{torch.randint(0,1000,(1,)).item()}/1024/1024"
+    # Dynamic seed for demo variety
+    url = f"https://picsum.photos/seed/{torch.randint(0,10000,(1,)).item()}/1024/1024"
     urllib.request.urlretrieve(url, "elite_test.jpg")
     img = Image.open("elite_test.jpg").convert('RGB')
     transform = transforms.Compose([transforms.Resize((256, 256)), transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
@@ -333,7 +408,7 @@ def test_elite(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--mode', type=str, choices=['train', 'demo'], default='train')
+    parser.add_argument('--mode', type=str, choices=['train', 'finetune', 'demo'], default='train')
     parser.add_argument('--sender_path', type=str, default='checkpoints/universal_tpu_master.pth')
     parser.add_argument('--receiver_path', type=str, default='checkpoints/elite_enhancer.pth')
     parser.add_argument('--data_dir', type=str, default='hd_finetune_data')
@@ -344,6 +419,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     if args.mode == 'train':
-        train_gan_enhancer(args)
+        train_gan_enhancer(args, is_finetune=False)
+    elif args.mode == 'finetune':
+        train_gan_enhancer(args, is_finetune=True)
     else:
         test_elite(args)

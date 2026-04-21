@@ -100,6 +100,8 @@ class QVS:
     def batch_COLLAPSE(self, asc_ids: List[str]) -> torch.Tensor:
         """Vectorized collapse for an entire batch. Zero Sync Points."""
         amps = torch.stack([self.ascs[aid].vec for aid in asc_ids])
+        # Use the device of the amplitudes
+        device = amps.device
         probs = torch.abs(amps).pow(2).to(torch.float32)
         
         # TPU Safety
@@ -118,12 +120,13 @@ class QVS:
     def batch_run_trajectories(self, intensities: torch.Tensor, trials: int = 10) -> torch.Tensor:
         """
         Hyper-Speed Quantum Trajectory Sampling.
-        Simulates the effect of 16KB manifold collapse without Python loops.
+        Dynamic Device Detection (TPU/GPU/CPU).
         """
+        device = intensities.device
         # Generate stochastic bias aligned with neural intensities
         B = intensities.shape[0]
         # Simulate p = cos^2(theta) behavior of quantum interference
-        random_seed = torch.rand(B, trials, device=self.device)
+        random_seed = torch.rand(B, trials, device=device)
         threshold = torch.cos(intensities.unsqueeze(-1) * np.pi).pow(2)
         
         # Parallel Realities

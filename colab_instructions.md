@@ -25,7 +25,7 @@ This is the recommended path for 40dB+ Retina-Grade synthesis. It replaces the o
 Builds the "Team A" core using 64 latent channels.
 ```bash
 # Rapid 20-Epoch Cycle for 16KB High Fidelity
-!python src/train_tpu.py --epochs 20 --batch_size 32 --sample_limit 10000
+!
 ```
 *Result: `checkpoints/universal_tpu_master.pth` (16KB DNA)*
 
