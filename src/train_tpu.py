@@ -36,7 +36,7 @@ from train import PerceptualLoss, ssim_loss
 
 def train_tpu_direct(flags):
     """Direct-attached training loop for v5e-1."""
-    device = xm.xla_device()
+    device = torch_xla.device()
     print(f"[*] Paradox Sovereign v5e Engine Activated on {device}", flush=True)
 
     # 1. Pipeline Acquisition
@@ -48,7 +48,9 @@ def train_tpu_direct(flags):
     
     # 2. Neural Manifold Initialization
     model = LatentGenesisCore(latent_channels=flags['latent_channels']).to(device)
-    optimizer = optim.Adam(model.parameters(), lr=flags['lr'])
+    # ELITE UPGRADE: 5x Speed boost. The 20-epoch cycle requires a far more aggressive initial descent.
+    # Betas tuned for rapid momentum decay.
+    optimizer = optim.Adam(model.parameters(), lr=flags['lr'] * 5.0, betas=(0.5, 0.999), eps=1e-4)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=flags['epochs'])
     perc_engine = PerceptualLoss().to(device).eval()
     
@@ -67,20 +69,25 @@ def train_tpu_direct(flags):
             
             recon, mu, logvar = model(images)
             
-            # Loss Synthesis (Phase 2.4 - Sovereign Stability)
+            # ELITE LOSS SYNTHESIS:
+            # Gradients MUST flow. Removing clamps allows the network to physically fix major errors 
+            # instead of hitting '0-gradient' dead-zones in the math.
             l1_l = F.l1_loss(recon, images)
-            s_l  = torch.clamp(ssim_loss(recon, images), 0, 1)
-            p_l  = torch.clamp(perc_engine(recon, images), 0, 100)
+            s_l  = ssim_loss(recon, images)
+            p_l  = perc_engine(recon, images)
             
-            # KLD (Already clamped in model.py)
+            # KLD (Already mathematically clamped in model.py to prevent overflow)
             kld_l = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
             
-            # Master Ratio for 40dB Stability
-            loss = (l1_l * 10.0) + (s_l * 0.1) + (p_l * 0.01) + (kld_l * 0.0001)
+            # Master Ratio 2.0: 
+            # - Massive L1 (50.0) ensures blueprint boundaries are mathematically rigid.
+            # - SSIM (1.0) forces precise structural geometry projection.
+            loss = (l1_l * 50.0) + (s_l * 1.0) + (p_l * 0.01) + (kld_l * 0.0001)
             
             loss.backward()
-            nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.5) # Tightened bound controls 5x LR
             xm.optimizer_step(optimizer)
+            torch_xla.sync() # Elite TPU graph sync mathematically mandates pristine tensor resolution
             
             # Real-time Telemetry
             pbar.set_postfix(loss=f"{loss.item():.4f}", lr=f"{scheduler.get_last_lr()[0]:.6f}")
