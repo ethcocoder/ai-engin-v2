@@ -58,33 +58,34 @@ class SovereignAntiGridEngine(nn.Module):
 
 class SovereignAestheticEngine(nn.Module):
     """
-    Advanced Chromatic & Structural Engine.
-    Handles: Luminance, Contrast, Color Temperature, and Smoothness.
+    Sovereign RRM (Relative-Rank) Engine.
+    Matches visual ratios to prevent chromatic displacement (Purple Haze).
     """
-    def __init__(self):
+    def __init__(self, device):
         super().__init__()
         self.mse = nn.MSELoss()
 
     def forward(self, fake, real):
-        # 1. Luminance & Contrast (Light/Shadow)
-        fake_l = fake.mean(dim=1, keepdim=True)
-        real_l = real.mean(dim=1, keepdim=True)
-        loss_lum = self.mse(fake_l, real_l)
-        loss_con = self.mse(torch.std(fake_l, dim=(2,3)), torch.std(real_l, dim=(2,3)))
+        # 1. Relative-Rank Match (RRM)
+        # Fixes Purple Haze by focusing on local intensity RATIOS.
+        f_gray = fake.mean(dim=1, keepdim=True)
+        r_gray = real.mean(dim=1, keepdim=True)
         
-        # 2. Chromatic Temperature (Color Balance)
-        # We match the mean and variance of each RGB channel independently
-        fake_color_mean = fake.mean(dim=(2,3))
-        real_color_mean = real.mean(dim=(2,3))
-        loss_temp = self.mse(fake_color_mean, real_color_mean)
+        f_diff_h = f_gray[:, :, 1:, :] - f_gray[:, :, :-1, :]
+        f_diff_w = f_gray[:, :, :, 1:] - f_gray[:, :, :, :-1]
+        r_diff_h = r_gray[:, :, 1:, :] - r_gray[:, :, :-1, :]
+        r_diff_w = r_gray[:, :, :, 1:] - r_gray[:, :, :, :-1]
         
-        # 3. Structural Smoothness (Total Variation)
-        # Reduces 'Neural Grain' in flats (like skies)
-        diff_h = torch.abs(fake[:, :, 1:, :] - fake[:, :, :-1, :]).mean()
-        diff_w = torch.abs(fake[:, :, :, 1:] - fake[:, :, :, :-1]).mean()
-        loss_tv = diff_h + diff_w
+        loss_rank = self.mse(f_diff_h, r_diff_h) + self.mse(f_diff_w, r_diff_w)
+
+        # 2. Chromatic Gravity (Atomic Color Lock)
+        # Pulls excessive color shifts back to the gray baseline
+        loss_gravity = torch.mean(torch.abs(fake.mean(dim=1, keepdim=True) - fake))
+
+        # 3. Micro-Texture Saliency (Energy Recovery)
+        loss_energy = torch.mean(torch.abs(fake.std(dim=(2,3)) - real.std(dim=(2,3))))
         
-        return loss_lum + loss_con + (loss_temp * 5.0) + (loss_tv * 0.1)
+        return (loss_rank * 50.0) + (loss_gravity * 10.0) + (loss_energy * 20.0)
 
 class EliteFeatureEngine(nn.Module):
     """
@@ -131,18 +132,35 @@ class EliteFeatureEngine(nn.Module):
 
 class HighFrequencyEdgeLoss(nn.Module):
     """
-    Penalizes only the edges. Forces the AI to generate high-frequency sharpness 
-    without falling into the 'blurry average' L1 trap.
+    Sovereign 'Needle-Point' Engine.
+    Uses Multi-Scale Laplacian of Gaussian (LoG) to find sub-pixel textures.
     """
     def __init__(self):
         super().__init__()
-        laplacian = torch.tensor([[0, 1, 0], [1, -4, 1], [0, 1, 0]], dtype=torch.float32)
-        self.register_buffer('kernel', laplacian.unsqueeze(0).unsqueeze(0).repeat(3, 1, 1, 1))
+        # 3x3 Laplacian Kernel for micro-dots and needle-points
+        self.laplacian_kernel = torch.tensor([[[[0,  1, 0], 
+                                                [1, -4, 1], 
+                                                [0,  1, 0]]]], dtype=torch.float32)
 
-    def forward(self, pred, target):
-        pred_edge = F.conv2d(pred, self.kernel, padding=1, groups=3)
-        target_edge = F.conv2d(target, self.kernel, padding=1, groups=3)
-        return F.l1_loss(pred_edge, target_edge)
+    def forward(self, fake, real):
+        device = fake.device
+        kernel = self.laplacian_kernel.to(device)
+        
+        # Multi-Scale Analysis (Original and Downsampled)
+        def get_dots(img):
+            gray = img.mean(dim=1, keepdim=True)
+            # Find sharp points
+            dots = torch.abs(F.conv2d(gray, kernel, padding=1))
+            # Downsample to find 'cluster' points
+            dots_low = torch.abs(F.conv2d(F.avg_pool2d(gray, 2), kernel, padding=1))
+            return dots, dots_low
+
+        f_dots, f_dots_l = get_dots(fake)
+        r_dots, r_dots_l = get_dots(real)
+        
+        # Penalize missing needle-points with High-Energy MSE
+        loss = F.mse_loss(f_dots, r_dots) + F.mse_loss(f_dots_l, r_dots_l)
+        return loss
 
 
 # =====================================================================
@@ -206,6 +224,8 @@ class EliteHallucinator(nn.Module):
         super().__init__()
         self.conv_first = nn.Conv2d(in_nc, nf, 3, 1, 1)
         self.trunk = nn.Sequential(*[FastAttentionBlock(nf) for _ in range(nb)])
+        # SEI: Sovereign Entropy Injection - The seed for sub-pixel texture growth
+        self.sei_strength = nn.Parameter(torch.ones(1, nf, 1, 1) * 0.005)
         self.conv_last = nn.Sequential(
             nn.Conv2d(nf, nf, 3, 1, 1),
             nn.LeakyReLU(0.2, inplace=True),
@@ -214,6 +234,12 @@ class EliteHallucinator(nn.Module):
 
     def forward(self, x):
         feat = self.conv_first(x)
+        
+        # --- SEI PARADIGM ---
+        # Introduce stochastic jitter as a texture template
+        jitter = torch.randn_like(feat) * self.sei_strength
+        feat = feat + jitter
+        
         trunk = self.trunk(feat)
         residual = self.conv_last(trunk)
         return torch.clamp(x + residual, -1.0, 1.0)
@@ -287,7 +313,7 @@ def train_gan_enhancer(args, is_finetune=False):
     
     feature_engine = EliteFeatureEngine().to(device).eval()
     hf_engine = HighFrequencyEdgeLoss().to(device).eval()
-    aesthetic_engine = SovereignAestheticEngine().to(device).eval()
+    aesthetic_engine = SovereignAestheticEngine(device).to(device).eval()
     sage_engine = SovereignAntiGridEngine().to(device).eval()
     criterion_gan = nn.BCEWithLogitsLoss()
 
@@ -328,8 +354,10 @@ def train_gan_enhancer(args, is_finetune=False):
             pred_fake_for_G_feats = netD(fake_imgs) 
             pred_real_for_G_feats = netD(real_imgs)
             
-            # 1. Adversarial Loss (BOOSTED for finetune)
-            adv_weight = 0.5 if is_finetune else 0.1
+            # --- SOVEREIGN APEX WEIGHTS ---
+            adv_weight = 20.0 if is_finetune else 0.5
+            pixel_weight = 0.0 if is_finetune else 0.1 # KILL L1 in finetune for pure detail
+            
             loss_G_adv = criterion_gan(pred_fake_for_G_feats[-1], torch.ones_like(pred_fake_for_G_feats[-1]))
             
             # 2. FEATURE MATCHING 
@@ -342,7 +370,6 @@ def train_gan_enhancer(args, is_finetune=False):
             loss_vibe = aesthetic_engine(fake_imgs, real_imgs)
             
             # --- SAGE: Anti-Grid Consistency ---
-            # Penalize any high-frequency 'coordinate spikes' that aren't in the original.
             fake_sage = sage_engine(fake_imgs)
             real_sage = sage_engine(real_imgs)
             loss_sage = F.mse_loss(fake_sage, real_sage)
@@ -350,10 +377,13 @@ def train_gan_enhancer(args, is_finetune=False):
             # Saliency Weighting
             loss_pixel = (F.l1_loss(fake_imgs, real_imgs, reduction='none') * saliency).mean()
             
-            # BEYOND-PERFECT FORMULA
-            vibe_weight = 15.0 if is_finetune else 2.0
-            sage_weight = 50.0 if is_finetune else 5.0
-            loss_G = (loss_pixel * 0.1) + (loss_feat * 5.0) + (loss_style * 5.0) + (loss_edge * 10.0) + (loss_fm * 5.0) + (loss_G_adv * adv_weight) + (loss_vibe * vibe_weight) + (loss_sage * sage_weight)
+            # THE APEX FORMULA
+            # In finetune, we maximize the 'Hallucination' pressure.
+            vibe_weight = 25.0 if is_finetune else 5.0
+            sage_weight = 100.0 if is_finetune else 10.0
+            
+            loss_G = (loss_pixel * pixel_weight) + (loss_feat * 5.0) + (loss_style * 5.0) + (loss_edge * 15.0) + \
+                     (loss_fm * 10.0) + (loss_G_adv * adv_weight) + (loss_vibe * vibe_weight) + (loss_sage * sage_weight)
             
             loss_G.backward()
             nn.utils.clip_grad_norm_(netG.parameters(), max_norm=0.5)
