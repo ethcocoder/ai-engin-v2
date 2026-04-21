@@ -304,7 +304,7 @@ def test_elite(args):
     for ax in axes: ax.axis('off')
     
     plt.tight_layout()
-    plt.savefig('elite_gan_synergy.png', formatted_dpi=300)
+    plt.savefig('elite_gan_synergy.png', dpi=300)
     print("\n[*] Elite Analysis Complete. Output saved to 'elite_gan_synergy.png'.")
 
 if __name__ == "__main__":
