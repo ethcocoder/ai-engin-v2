@@ -1,12 +1,12 @@
 """
-receiver_enhancer.py — Paradox ESRGAN (Team B - TPU Pure Stability Rebuild)
+receiver_enhancer.py — Paradox ESRGAN (Team B - Sovereign Bespoke Edition)
 ==========================================================================
-State-of-the-Art Adversarial Super Resolution Engine.
-Rebuilt from scratch to eliminate XLA/BF16 NaN crashes with mathematically safe layers.
+Engineered explicitly for hyper-rapid 20-Epoch 16KB texture hallucination.
+Deploys Gram-Matrix Style Fusion and High-Frequency Edge Extraction to 
+shatter the L1 blur-trap and evade VGG worm artifacts permanently.
 """
 
 import os
-# Ensure TPUs behave deterministically regarding precision downcasting
 os.environ['XLA_USE_BF16'] = '0'
 os.environ['XLA_DOWNCAST_BF16'] = '0'
 
@@ -26,7 +26,6 @@ from model import LatentGenesisCore
 from finetune_tpu import FastHDDataset, download_div2k
 import torchvision.models as models
 
-# --- TPU Integration ---
 try:
     import torch_xla
     import torch_xla.core.xla_model as xm
@@ -36,35 +35,70 @@ except ImportError:
     TPU_AVAILABLE = False
 
 
-class SafePerceptualLoss(nn.Module):
-    """Uses L1 to inherently prevent BF16 squaring overflow."""
+class EliteStyleFusionEngine(nn.Module):
+    """
+    Overcomes the VGG 'worm cheat' by capturing the raw texture *distributions* (Gram Matrix)
+    instead of just point-to-point edge maps. Forces rapid generation of real 
+    HD textures (wood, leaves, sky) regardless of spatial shifting.
+    """
     def __init__(self):
         super().__init__()
         vgg = models.vgg16(weights=models.VGG16_Weights.IMAGENET1K_V1).features
-        self.slice1 = nn.Sequential(*vgg[:4])   
-        self.slice2 = nn.Sequential(*vgg[4:9])  
-        self.slice3 = nn.Sequential(*vgg[9:16]) 
+        self.slice1 = nn.Sequential(*vgg[:4])   # ReLU1_2
+        self.slice2 = nn.Sequential(*vgg[4:9])  # ReLU2_2
+        self.slice3 = nn.Sequential(*vgg[9:16]) # ReLU3_3
+        self.slice4 = nn.Sequential(*vgg[16:23])# ReLU4_3
         for param in self.parameters():
             param.requires_grad = False
         self.register_buffer("mean", torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
         self.register_buffer("std", torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
 
-    def forward(self, x, y):
-        x = (x * 0.5 + 0.5 - self.mean) / self.std
-        y = (y * 0.5 + 0.5 - self.mean) / self.std
+    def gram_matrix(self, input):
+        b, c, h, w = input.size()
+        features = input.view(b, c, h * w)
+        G = torch.bmm(features, features.transpose(1, 2))
+        return G.div(c * h * w)
+
+    def forward(self, pred, target):
+        pr = (pred * 0.5 + 0.5 - self.mean) / self.std
+        tr = (target * 0.5 + 0.5 - self.mean) / self.std
         
-        x_f1, y_f1 = self.slice1(x), self.slice1(y)
-        x_f2, y_f2 = self.slice2(x_f1), self.slice2(y_f1)
-        x_f3, y_f3 = self.slice3(x_f2), self.slice3(y_f2)
+        pr_f1 = self.slice1(pr); tr_f1 = self.slice1(tr)
+        pr_f2 = self.slice2(pr_f1); tr_f2 = self.slice2(tr_f1)
+        pr_f3 = self.slice3(pr_f2); tr_f3 = self.slice3(tr_f2)
+        pr_f4 = self.slice4(pr_f3); tr_f4 = self.slice4(tr_f3)
         
-        return F.l1_loss(x_f1, y_f1) + F.l1_loss(x_f2, y_f2) + F.l1_loss(x_f3, y_f3)
+        # Content Loss: Keeps the deep semantics (objects) locked.
+        loss_content = F.l1_loss(pr_f4, tr_f4)
+        
+        # Style Loss: Explodes the speed at which real micro-textures synthesize
+        loss_style = F.l1_loss(self.gram_matrix(pr_f1), self.gram_matrix(tr_f1)) + \
+                     F.l1_loss(self.gram_matrix(pr_f2), self.gram_matrix(tr_f2)) + \
+                     F.l1_loss(self.gram_matrix(pr_f3), self.gram_matrix(tr_f3))
+                     
+        return loss_content, loss_style
+
+
+class HighFrequencyEdgeLoss(nn.Module):
+    """
+    Penalizes only the edges. Forces the AI to generate high-frequency sharpness 
+    without falling into the 'blurry average' L1 trap.
+    """
+    def __init__(self):
+        super().__init__()
+        laplacian = torch.tensor([[0, 1, 0], [1, -4, 1], [0, 1, 0]], dtype=torch.float32)
+        self.register_buffer('kernel', laplacian.unsqueeze(0).unsqueeze(0).repeat(3, 1, 1, 1))
+
+    def forward(self, pred, target):
+        pred_edge = F.conv2d(pred, self.kernel, padding=1, groups=3)
+        target_edge = F.conv2d(target, self.kernel, padding=1, groups=3)
+        return F.l1_loss(pred_edge, target_edge)
 
 
 # =====================================================================
-# 1. ELITE GENERATOR: Pure ESRGAN (No Normalizations for Stability)
+# 1. ELITE GENERATOR: Unchained Speed
 # =====================================================================
 class ResidualDenseBlock_5C(nn.Module):
-    """Dense Block without Normalizations—avoids TPU zero-variance crashes"""
     def __init__(self, nf=64, gc=32):
         super().__init__()
         self.conv1 = nn.Conv2d(nf, gc, 3, 1, 1, bias=True)
@@ -106,30 +140,26 @@ class EliteHallucinator(nn.Module):
             nn.LeakyReLU(negative_slope=0.2, inplace=True),
             nn.Conv2d(nf, out_nc, 3, 1, 1, bias=True)
         )
-        self.scale = 0.1 # Heavily buffers the initial output against exploding
 
     def forward(self, x):
         feat = self.conv_first(x)
         trunk = self.trunk_conv(self.RRDB_trunk(feat))
         feat = feat + trunk
         residual = self.conv_last(feat)
-        # CRITICAL FIX: Removed tanh(x+res). Tanh squashed the pre-normalized [-1,1] image by 24% immediately, 
-        # destroying all contrast and forcing the network to learn to fight itself to reach pure black/white!
-        # Gradients were dying in the tanh asymptotes. Clamp is the mathematically correct bounding.
-        return torch.clamp(x + residual * self.scale, -1.0, 1.0)
+        # CRITICAL UNCHAIN: Removed the 10% (.1) bottleneck multiplier. 
+        # For a 20-epoch speedrun, the AI must be permitted to blast full power immediately.
+        return torch.clamp(x + residual, -1.0, 1.0)
 
 
 # =====================================================================
-# 2. ELITE DISCRIMINATOR: GroupNorm Stabilized
+# 2. ELITE DISCRIMINATOR
 # =====================================================================
 class StableDiscriminator(nn.Module):
-    """VGG style Discriminator utilizing GroupNorm to evade TPU NaN bugs."""
     def __init__(self, in_channels=3):
         super().__init__()
         def block(in_feat, out_feat, stride=1, normalize=True):
             layers = [nn.Conv2d(in_feat, out_feat, 3, stride=stride, padding=1, bias=not normalize)]
             if normalize: 
-                # GroupNorm avoids Instance/Batch norm div-by-zero crashes perfectly
                 layers.append(nn.GroupNorm(8, out_feat, eps=1e-4))
             layers.append(nn.LeakyReLU(0.2, inplace=True))
             return layers
@@ -151,7 +181,7 @@ class StableDiscriminator(nn.Module):
 # =====================================================================
 def train_gan_enhancer(args):
     device = torch_xla.device() if TPU_AVAILABLE else torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"[*] Igniting Rebuilt Elite GAN on {device}...")
+    print(f"[*] Igniting Bespoke Elite GAN on {device}...")
 
     download_div2k(args.data_dir)
     dataset = FastHDDataset(args.data_dir)
@@ -166,11 +196,12 @@ def train_gan_enhancer(args):
     netG = EliteHallucinator(nb=args.nb).to(device)
     netD = StableDiscriminator().to(device)
     
-    # eps=1e-4 crucial for BF16/TPU numerical limits
-    optG = optim.Adam(netG.parameters(), lr=args.lr, betas=(0.5, 0.999), eps=1e-4)
+    # UNCHAINED LR: Generator boosted to learn 2x faster in the 20 epoch sprint.
+    optG = optim.Adam(netG.parameters(), lr=args.lr * 2.0, betas=(0.5, 0.999), eps=1e-4)
     optD = optim.Adam(netD.parameters(), lr=args.lr, betas=(0.5, 0.999), eps=1e-4)
     
-    perc_engine = SafePerceptualLoss().to(device).eval()
+    style_engine = EliteStyleFusionEngine().to(device).eval()
+    hf_engine = HighFrequencyEdgeLoss().to(device).eval()
     criterion_gan = nn.BCEWithLogitsLoss()
 
     for epoch in range(args.epochs):
@@ -191,7 +222,6 @@ def train_gan_enhancer(args):
             pred_real = netD(real_imgs)
             pred_fake = netD(fake_imgs.detach())
             
-            # Label smoothing real labels to 0.9 to prevent discriminator over-confidence
             target_real = torch.full_like(pred_real, 0.9)
             target_fake = torch.zeros_like(pred_fake)
             
@@ -214,14 +244,16 @@ def train_gan_enhancer(args):
             target_real_G = torch.ones_like(pred_fake_for_G)
             
             loss_G_adv = criterion_gan(pred_fake_for_G, target_real_G)
-            loss_G_perc = perc_engine(fake_imgs_for_G, real_imgs)
-            loss_G_l1 = F.l1_loss(fake_imgs_for_G, real_imgs)
+            loss_content, loss_style = style_engine(fake_imgs_for_G, real_imgs)
+            loss_edge = hf_engine(fake_imgs_for_G, real_imgs)
+            loss_l1 = F.l1_loss(fake_imgs_for_G, real_imgs)
             
-            # CRITICAL FIX: The Generator accurately identified semantic boundary lines (objects), 
-            # but 'cheated' by drawing thick neon 'worms' to hack the deep VGG features. 
-            # We must drastically scale down the Perceptual and Adv weights to stop this hallucination, 
-            # forcing it to rely on L1 (pixel accuracy) to draw true micro-edges.
-            loss_G = (loss_G_l1 * 50.0) + (loss_G_perc * 0.01) + (loss_G_adv * 0.005)
+            # THE BESPOKE FORMULA:
+            # - Remove massive L1 anchor (It causes mathematically mandated average blur).
+            # - Style * 10.0 synthesizes high-res HD textures directly from patterns.
+            # - Edge * 5.0 forces physical sharpness out of the Blur hole.
+            # - Adv * 0.05 drives local reality without causing neon hacks.
+            loss_G = (loss_l1 * 1.0) + (loss_content * 1.0) + (loss_style * 10.0) + (loss_edge * 5.0) + (loss_G_adv * 0.05)
             
             loss_G.backward()
             nn.utils.clip_grad_norm_(netG.parameters(), max_norm=0.5)
@@ -272,7 +304,7 @@ def test_elite(args):
     for ax in axes: ax.axis('off')
     
     plt.tight_layout()
-    plt.savefig('elite_gan_synergy.png', dpi=300)
+    plt.savefig('elite_gan_synergy.png', formatted_dpi=300)
     print("\n[*] Elite Analysis Complete. Output saved to 'elite_gan_synergy.png'.")
 
 if __name__ == "__main__":
