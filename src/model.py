@@ -47,10 +47,10 @@ class ResBlock(nn.Module):
         super().__init__()
         self.conv = nn.Sequential(
             nn.Conv2d(channels, channels, kernel_size=3, padding=1, bias=False),
-            nn.GroupNorm(4, channels, eps=1e-4),
+            nn.BatchNorm2d(channels),
             nn.ReLU(inplace=True),
             nn.Conv2d(channels, channels, kernel_size=3, padding=1, bias=False),
-            nn.GroupNorm(4, channels, eps=1e-4),
+            nn.BatchNorm2d(channels),
         )
         self.relu = nn.ReLU(inplace=True)
 
@@ -79,22 +79,22 @@ class SemanticEncoder(nn.Module):
         self.layers = nn.Sequential(
             # 3 → 32 ch, spatial /2
             nn.Conv2d(3, 32, kernel_size=4, stride=2, padding=1, bias=False),
-            nn.GroupNorm(4, 32, eps=1e-4),
+            nn.BatchNorm2d(32),
             nn.ReLU(inplace=True),
             ResBlock(32),
             # 32 → 64 ch, spatial /2
             nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=1, bias=False),
-            nn.GroupNorm(4, 64, eps=1e-4),
+            nn.BatchNorm2d(64),
             nn.ReLU(inplace=True),
             ResBlock(64),
             # 64 → 128 ch, spatial /2
             nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1, bias=False),
-            nn.GroupNorm(4, 128, eps=1e-4),
+            nn.BatchNorm2d(128),
             nn.ReLU(inplace=True),
             ResBlock(128),
             # 128 → 256 ch, spatial /2 [New HD Stage]
             nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1, bias=False),
-            nn.GroupNorm(4, 256, eps=1e-4),
+            nn.BatchNorm2d(256),
             nn.ReLU(inplace=True),
             ResBlock(256),
         )
@@ -132,7 +132,7 @@ class GenesisDecoder(nn.Module):
         # Expand latent to rich 256-channel manifold
         self.expand = nn.Sequential(
             nn.Conv2d(latent_channels, 256, kernel_size=3, padding=1, bias=False),
-            nn.GroupNorm(4, 256, eps=1e-4),
+            nn.BatchNorm2d(256),
             nn.ReLU(inplace=True),
             ResBlock(256),
             ResBlock(256),
@@ -145,7 +145,7 @@ class GenesisDecoder(nn.Module):
         self.up1 = nn.Sequential(
             nn.Conv2d(256, 256, kernel_size=3, padding=1, bias=False),
             nn.PixelShuffle(2),
-            nn.GroupNorm(4, 64, eps=1e-4),
+            nn.BatchNorm2d(64),
             nn.ReLU(inplace=True),
             ResBlock(64),
         )
@@ -153,7 +153,7 @@ class GenesisDecoder(nn.Module):
         self.up2 = nn.Sequential(
             nn.Conv2d(64, 256, kernel_size=3, padding=1, bias=False),
             nn.PixelShuffle(2),
-            nn.GroupNorm(4, 64, eps=1e-4),
+            nn.BatchNorm2d(64),
             nn.ReLU(inplace=True),
             ResBlock(64),
         )
@@ -161,7 +161,7 @@ class GenesisDecoder(nn.Module):
         self.up3 = nn.Sequential(
             nn.Conv2d(64, 256, kernel_size=3, padding=1, bias=False),
             nn.PixelShuffle(2),
-            nn.GroupNorm(4, 64, eps=1e-4),
+            nn.BatchNorm2d(64),
             nn.ReLU(inplace=True),
             ResBlock(64),
         )
@@ -169,7 +169,7 @@ class GenesisDecoder(nn.Module):
         self.up4 = nn.Sequential(
             nn.Conv2d(64, 48, kernel_size=3, padding=1, bias=False),
             nn.PixelShuffle(2),
-            nn.GroupNorm(4, 12, eps=1e-4),
+            nn.BatchNorm2d(12),
             nn.ReLU(inplace=True),
             nn.Conv2d(12, 3, kernel_size=3, padding=1),
             nn.Tanh(),
@@ -232,31 +232,38 @@ class LatentGenesisCore(nn.Module):
         self, mu: torch.Tensor, logvar: torch.Tensor
     ) -> torch.Tensor:
         """
-        QVS-modulated reparameterization trick with TPU-Vectorization support.
+        QVS-modulated 'Collapse' of the 16KB Probability Manifold.
+        
+        The 16KB data is treated as a set of quantum states (superposition). 
+        This method determines the exact vector to 'collapse' these states 
+        into a physical, high-fidelity image.
         """
         batch_size = mu.shape[0]
         
-        # --- Paradox NaN-Shield ---
-        # Clamp log-variance to prevent exponential explosions natively on BF16
-        # Elite Upgrade: 10.0 is astronomically large for a VAE. Tightened to 4.0 to secure stability.
+        # NaN-Shield: Clamp variance to protect the probability manifold
         logvar = torch.clamp(logvar, -10.0, 4.0)
         std = torch.exp(0.5 * logvar)
         
-        # --- Paradox TPU-Optimization Check ---
         _is_tpu = 'PJRT_DEVICE' in os.environ or 'TPU_NAME' in os.environ
 
         if self.training:
             if _is_tpu:
-                # Use Pure Tensor Math on TPU to prevent CPU synchronization bottlenecks
-                # This approximates the phase-weave without the slow Python loop
+                # Stochastic Superposition: On TPU, we use tensor-parallel noise 
+                # to simulate probabilistic outcomes.
                 eps = torch.randn_like(std)
             else:
+                # Quantum Collapse: On local silicon, we use the QVS to 
+                # mathematically collapse the 16KB DNA.
                 phase_biases = []
                 for i in range(batch_size):
                     asc_id = self.qvs.create_asc(size=2)
                     self.qvs.SUPERPOSE(asc_id, [(0, 0), (0, 1), (1, 0), (1, 1)])
+                    
+                    # Weave phase based on 16KB energy density
                     intensity = torch.mean(mu[i]).item()
                     self.qvs.WEAVE(asc_id, phase_angle=intensity * np.pi)
+                    
+                    # COLLAPSE back into a singular reality (±1)
                     outcome = self.qvs.COLLAPSE(asc_id)
                     phase_biases.append(1.0 if sum(outcome) % 2 == 0 else -1.0)
                     self.qvs.delete_asc(asc_id)
@@ -266,6 +273,7 @@ class LatentGenesisCore(nn.Module):
                 ).view(batch_size, 1, 1, 1)
                 eps = torch.randn_like(std) * bias_tensor
         else:
+            # Inference: Low-temperature 'Superposition Freeze'
             eps = torch.randn_like(std) * 0.1
 
         return mu + eps * std

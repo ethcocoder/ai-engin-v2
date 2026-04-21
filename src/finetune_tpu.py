@@ -131,8 +131,9 @@ def run_reinforcement_finetune(args):
             # Lock the KLD tight to force the latent space to focus purely on texture accuracy
             kld_l = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
             
-            # Massive bias towards Perceptual and SSIM to learn pure sharpness
-            loss = (l1_l * 5.0) + (s_l * 0.5) + (p_l * 0.2) + (kld_l * 0.0001)
+            # THE PERFECT LEVEL FINETUNE:
+            # Shift weight almost entirely to SSIM and Perceptual to burn in high-frequency details.
+            loss = (l1_l * 1.0) + (s_l * 20.0) + (p_l * 2.0) + (kld_l * 0.0001)
             
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)

@@ -48,9 +48,8 @@ def train_tpu_direct(flags):
     
     # 2. Neural Manifold Initialization
     model = LatentGenesisCore(latent_channels=flags['latent_channels']).to(device)
-    # ELITE UPGRADE: 5x Speed boost. The 20-epoch cycle requires a far more aggressive initial descent.
-    # Betas tuned for rapid momentum decay.
-    optimizer = optim.Adam(model.parameters(), lr=flags['lr'] * 5.0, betas=(0.5, 0.999), eps=1e-4)
+    # SOVEREIGN HYBRID LR: Reduced from 5x to 2x for better structural refinement (v1 style).
+    optimizer = optim.Adam(model.parameters(), lr=flags['lr'] * 2.0, betas=(0.5, 0.999), eps=1e-4)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=flags['epochs'])
     perc_engine = PerceptualLoss().to(device).eval()
     
@@ -69,25 +68,26 @@ def train_tpu_direct(flags):
             
             recon, mu, logvar = model(images)
             
-            # ELITE LOSS SYNTHESIS:
-            # Gradients MUST flow. Removing clamps allows the network to physically fix major errors 
-            # instead of hitting '0-gradient' dead-zones in the math.
+            # --- THE BEYOND PERFECT FORMULA (Feature-Only focus) ---
+            # We de-prioritize L1 almost entirely (set to 0.1).
+            # This tells the AI: 'I don't care about exact pixel colors, I care about SHAPES and CONCEPTS.'
             l1_l = F.l1_loss(recon, images)
             s_l  = ssim_loss(recon, images)
             p_l  = perc_engine(recon, images)
             
-            # KLD (Already mathematically clamped in model.py to prevent overflow)
+            # KLD (Clamped for stability)
             kld_l = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
             
-            # Master Ratio 2.0: 
-            # - Massive L1 (50.0) ensures blueprint boundaries are mathematically rigid.
-            # - SSIM (1.0) forces precise structural geometry projection.
-            loss = (l1_l * 50.0) + (s_l * 1.0) + (p_l * 0.01) + (kld_l * 0.0001)
+            # Feature-Centric Ratio:
+            # - Pixel (0.1): Minimal structural anchor.
+            # - SSIM (20.0): Extreme geometry focus.
+            # - Perc (5.0): Deep texture intelligence.
+            loss = (l1_l * 0.1) + (s_l * 20.0) + (p_l * 5.0) + (kld_l * 0.0005)
             
             loss.backward()
-            nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.5) # Tightened bound controls 5x LR
+            nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.5)
             xm.optimizer_step(optimizer)
-            torch_xla.sync() # Elite TPU graph sync mathematically mandates pristine tensor resolution
+            torch_xla.sync() 
             
             # Real-time Telemetry
             pbar.set_postfix(loss=f"{loss.item():.4f}", lr=f"{scheduler.get_last_lr()[0]:.6f}")
