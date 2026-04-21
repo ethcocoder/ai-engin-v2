@@ -86,8 +86,9 @@ def train_tpu_direct(flags):
             
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.5)
+            # xm.optimizer_step handles the graph step automatically. 
+            # Manual sync inside the loop is the enemy of speed.
             xm.optimizer_step(optimizer)
-            torch_xla.sync() 
             
             # Real-time Telemetry
             pbar.set_postfix(loss=f"{loss.item():.4f}", lr=f"{scheduler.get_last_lr()[0]:.6f}")

@@ -89,9 +89,10 @@ def run_reinforcement_finetune(args):
     download_div2k(args.data_dir)
 
     dataset = FastHDDataset(args.data_dir)
+    # SPEED BOOST: Increased batch_size and enabled 8 workers for TPU Host saturation
     loader = DataLoader(
-        dataset, batch_size=args.batch_size, shuffle=True, 
-        num_workers=0, drop_last=True
+        dataset, batch_size=32, shuffle=True, 
+        num_workers=8, drop_last=True, pin_memory=True
     )
     
     # 1. Load the Structurally Perfect Checkpoint

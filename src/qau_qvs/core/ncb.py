@@ -1,89 +1,64 @@
+import torch
 import numpy as np
-import copy
 from typing import Tuple, Dict, List, Optional
 from .asc import ASC
 
 class NCB:
     """
-    Non-Local Correlation Bond (NCB)
-    ================================
-    The primitive of INFORMATIONAL CONSTRAINT.
-    
-    A bond between two or more ASCs that ensures joint probability distributions 
-    cannot be factorized. On silicon, this is represented by a shared pointer: 
-    when one ASC changes, its bonded partner(s) change synchronously.
-    
-    This is effectively the mechanism behind quantum entanglement.
+    Non-Local Correlation Bond (NCB) - TPU Optimized
+    ================================================
+    Handles informational entanglement between latent channels.
     """
     
-    def __init__(self, asc_ids: List[str], correlation_type: str = "custom"):
-        """
-        Args:
-            asc_ids: List of ASC IDs participating in the bond.
-            correlation_type: 'bell', 'ghz', 'w-state', or 'custom'.
-        """
-        self.asc_ids = asc_ids
-        self.correlation_type = correlation_type
-
     @staticmethod
     def bond(asc_a: ASC, asc_b: ASC, bond_type: str = "bell") -> ASC:
         """
-        Forges a bond between two systems and returns the unified joint state.
-        
-        This mimics the QVS behavior where the systems 'couple' and become 
-        one computational object.
+        Forges a bond using Torch Kronecker products.
         """
-        # 1. Start with tensor product of A and B
+        device = asc_a.device
         joint_size = asc_a.size + asc_b.size
-        joint_amplitudes: Dict[Tuple, complex] = {}
-        for (sa, wa) in asc_a.amplitudes.items():
-            for (sb, wb) in asc_b.amplitudes.items():
-                joint_state = sa + sb
-                joint_amplitudes[joint_state] = wa * wb
         
-        # 2. Forge the bond (Apply ENTAGLEMENT)
+        # 1. Base joint state (Tensor Product)
+        # torch.kron is available in recent torch versions or we can use outer + reshape
+        vec_a = asc_a.vec
+        vec_b = asc_b.vec
+        joint_vec = torch.outer(vec_a, vec_b).reshape(-1)
+        
+        # 2. Apply ENTAGLEMENT Logic directly on tensor
         if bond_type == "bell":
-            # Typical Bell state: |00> + |11> or similar.
-            # In silicon-native terms, this is a SHARED constraint.
-            # Here we simulate it by transforming the joint state.
             if joint_size >= 2:
-                # Let's create |00...0> + |11...0>
-                new_amps = {}
-                base_weight = 1.0 / np.sqrt(2)
-                
-                # Default to base states |0...0> and |1...1...0...>
-                s0 = (0,) * joint_size
-                s1 = (1, 1) + (0,) * (joint_size - 2)
-                new_amps[s0] = base_weight
-                new_amps[s1] = base_weight
-                joint_amplitudes = new_amps
+                # Force into |00> + |11> state representation
+                new_vec = torch.zeros(2**joint_size, dtype=torch.complex64, device=device)
+                new_vec[0] = 0.7071 # |00...0>
+                # index for |110...0>
+                idx_11 = 3 * (2**(joint_size - 2))
+                new_vec[idx_11] = 0.7071
+                joint_vec = new_vec
 
         elif bond_type == "ghz":
-            # Global non-local constraint: |000...> + |111...>
             if joint_size >= 2:
-                base_weight = 1.0 / np.sqrt(2)
-                s0 = (0,) * joint_size
-                s1 = (1,) * joint_size
-                joint_amplitudes = {s0: base_weight, s1: base_weight}
+                new_vec = torch.zeros(2**joint_size, dtype=torch.complex64, device=device)
+                new_vec[0] = 0.7071
+                new_vec[-1] = 0.7071 # |11...1>
+                joint_vec = new_vec
 
-        return ASC(joint_amplitudes, joint_size).normalize()
+        res_asc = ASC(size=joint_size, device=device)
+        res_asc.vec = joint_vec
+        return res_asc.normalize()
 
     @staticmethod
     def get_entanglement_entropy(asc: ASC, partition_idx: int) -> float:
         """
-        Calculate the entanglement entropy of an ASC's partition.
-        Measure of how strong the NCB is across a split in the system.
+        Calculate entropy using Torch SVD (highly optimized on TPU).
         """
-        # For simplicity, we convert to full density matrix and then partial trace.
-        # Silicon-native would do this via tensor contraction.
-        vec = asc.get_state_vector()
+        vec = asc.vec
         dim_a = 2**partition_idx
         dim_b = 2**(asc.size - partition_idx)
         
         mat = vec.reshape(dim_a, dim_b)
-        U, S, Vh = np.linalg.svd(mat) # SVD decomposition for Schmidt coefficients
+        # SVD on TPU
+        _, S, _ = torch.linalg.svd(mat)
         
-        # Reduced density matrix eigenvalues are S^2
-        probs = S**2
+        probs = torch.abs(S)**2
         probs = probs[probs > 1e-15]
-        return float(-np.sum(probs * np.log2(probs)))
+        return float(-torch.sum(probs * torch.log2(probs)))

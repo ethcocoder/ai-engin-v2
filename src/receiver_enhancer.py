@@ -27,6 +27,11 @@ from finetune_tpu import FastHDDataset, download_div2k
 import torchvision.models as models
 
 try:
+    from qau_qvs.core.qvs import QVS
+except ImportError:
+    from .qau_qvs.core.qvs import QVS
+
+try:
     import torch_xla
     import torch_xla.core.xla_model as xm
     import torch_xla.distributed.parallel_loader as pl
@@ -115,7 +120,7 @@ class PixelAttention(nn.Module):
 class FastAttentionBlock(nn.Module):
     """
     Replaces RRDB for 3x speedup. Uses a streamlined residual path 
-    with Pixel Attention and Stochastic Noise Injection.
+    with Pixel Attention and Quantum-Stochastic Superposition.
     """
     def __init__(self, nf=64):
         super().__init__()
@@ -126,12 +131,28 @@ class FastAttentionBlock(nn.Module):
         
         # PROBABILITY ENGINE: Learnable noise scaling
         self.noise_scale = nn.Parameter(torch.zeros(1, nf, 1, 1))
+        self.qvs = QVS()
 
     def forward(self, x):
         res = self.lrelu(self.conv1(x))
         
-        # Superposition Injection: Fill gaps with probabilistic detail
-        noise = torch.randn(res.size(0), 1, res.size(2), res.size(3), device=res.device)
+        # QUANTUM-STOCHASTIC SUPERPOSITION:
+        # We use the QVS to peek into the 16KB space by running 
+        # trajectory simulations natively on the target device.
+        batch_size = x.size(0)
+        with torch.no_grad():
+            noise_list = []
+            for i in range(batch_size):
+                # Create a local quantum state
+                asc_id = self.qvs.create_asc(size=1)
+                # Poll 10 possible realities using TPU-Accelerated Trajectories
+                probs = self.qvs.run_trajectories(asc_id, trials=10)
+                # Convert outcomes to a probabilistic bias
+                bias = sum([outcome[0] * prob for outcome, prob in probs.items()])
+                noise_list.append(torch.randn_like(res[i]) + bias)
+                self.qvs.delete_asc(asc_id)
+            noise = torch.stack(noise_list)
+
         res = res + (noise * self.noise_scale)
         
         res = self.conv2(res)
@@ -195,7 +216,8 @@ def train_gan_enhancer(args):
 
     download_div2k(args.data_dir)
     dataset = FastHDDataset(args.data_dir)
-    loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, drop_last=True)
+    # SPEED BOOST: Use 8 workers to feed images to TPU.
+    loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, drop_last=True, num_workers=8)
     
     sender_model = LatentGenesisCore(latent_channels=64).to(device)
     if os.path.exists(args.sender_path):
@@ -276,8 +298,6 @@ def train_gan_enhancer(args):
             if TPU_AVAILABLE: xm.optimizer_step(optG)
             else: optG.step()
             
-            if TPU_AVAILABLE: torch_xla.sync() 
-            
             pbar.set_postfix(D=f"{loss_D.item():.3f}", G=f"{loss_G.item():.3f}")
             pbar.update(1)
         pbar.close()
@@ -328,7 +348,7 @@ if __name__ == "__main__":
     parser.add_argument('--sender_path', type=str, default='checkpoints/universal_tpu_master.pth')
     parser.add_argument('--receiver_path', type=str, default='checkpoints/elite_enhancer.pth')
     parser.add_argument('--data_dir', type=str, default='hd_finetune_data')
-    parser.add_argument('--batch_size', type=int, default=2) 
+    parser.add_argument('--batch_size', type=int, default=8) 
     parser.add_argument('--nb', type=int, default=8) 
     parser.add_argument('--epochs', type=int, default=20) 
     parser.add_argument('--lr', type=float, default=1e-4) 

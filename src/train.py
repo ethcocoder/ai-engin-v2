@@ -72,9 +72,19 @@ def _gaussian_window(size: int = 11, sigma: float = 1.5) -> torch.Tensor:
     return window.unsqueeze(0).unsqueeze(0)
 
 
+_ssim_window_cache = {}
+
 def ssim_loss(x, y, window_size: int = 11):
     C_ch = x.shape[1]
-    window = _gaussian_window(window_size).to(x.device).expand(C_ch, 1, window_size, window_size).contiguous()
+    device = x.device
+    
+    # ── Paradox Cache Protocol ────────────────────────────────────────────────
+    # Reuse the window to prevent massive TPU-recompilation overhead.
+    cache_key = (window_size, C_ch, device)
+    if cache_key not in _ssim_window_cache:
+        _ssim_window_cache[cache_key] = _gaussian_window(window_size).to(device).expand(C_ch, 1, window_size, window_size).contiguous()
+    
+    window = _ssim_window_cache[cache_key]
     pad = window_size // 2
 
     mu_x = F.conv2d(x, window, padding=pad, groups=C_ch)

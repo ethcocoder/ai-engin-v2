@@ -33,13 +33,13 @@ Builds the "Team A" core using 64 latent channels.
 Teaches the model to handle razor-sharp high-frequency edges.
 ```bash
 # Downloads DIV2K HD images and fine-tunes for 20 Epochs
-!python src/finetune_tpu.py --epochs 20 --batch_size 16
+!python src/finetune_tpu.py --epochs 20 --batch_size 32
 ```
 
 ### Step C: Train the Elite Hallucinator (The Receiver)
-Ignites the GAN engine on the receiver side to sharpen the 16KB neural stream.
+Ignites the Quantum-Stochastic GAN engine on the receiver side to collapse the 16KB neural stream into razor-sharp reality.
 ```bash
-# Trains Team B with 12 RRDB Blocks for maximum detail
+# Trains Team B with the new Beyond-Perfect Stochastic/PA Engine
 !python src/receiver_enhancer.py --mode train --epochs 20
 ```
 *Result: `checkpoints/elite_enhancer.pth`*

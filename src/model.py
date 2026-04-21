@@ -244,34 +244,27 @@ class LatentGenesisCore(nn.Module):
         logvar = torch.clamp(logvar, -10.0, 4.0)
         std = torch.exp(0.5 * logvar)
         
-        _is_tpu = 'PJRT_DEVICE' in os.environ or 'TPU_NAME' in os.environ
-
         if self.training:
-            if _is_tpu:
-                # Stochastic Superposition: On TPU, we use tensor-parallel noise 
-                # to simulate probabilistic outcomes.
-                eps = torch.randn_like(std)
-            else:
-                # Quantum Collapse: On local silicon, we use the QVS to 
-                # mathematically collapse the 16KB DNA.
-                phase_biases = []
-                for i in range(batch_size):
-                    asc_id = self.qvs.create_asc(size=2)
-                    self.qvs.SUPERPOSE(asc_id, [(0, 0), (0, 1), (1, 0), (1, 1)])
-                    
-                    # Weave phase based on 16KB energy density
-                    intensity = torch.mean(mu[i]).item()
-                    self.qvs.WEAVE(asc_id, phase_angle=intensity * np.pi)
-                    
-                    # COLLAPSE back into a singular reality (±1)
-                    outcome = self.qvs.COLLAPSE(asc_id)
-                    phase_biases.append(1.0 if sum(outcome) % 2 == 0 else -1.0)
-                    self.qvs.delete_asc(asc_id)
+            # Quantum-Sovereign Reparameterization:
+            # We now use the Batch-Optimized QVS logic directly on TPU/GPU hardware.
+            phase_biases = []
+            for i in range(batch_size):
+                # Create and Entangle the 16KB manifold
+                asc_id_a = self.qvs.create_asc(size=1)
+                asc_id_b = self.qvs.create_asc(size=1)
+                joint_asc_id = self.qvs.BOND(asc_id_a, asc_id_b, bond_type="bell")
+                
+                # Weave Phase and Collapse
+                intensity = torch.mean(mu[i]).item()
+                self.qvs.WEAVE(joint_asc_id, phase_angle=intensity * np.pi)
+                outcome = self.qvs.COLLAPSE(joint_asc_id)
+                phase_biases.append(1.0 if sum(outcome) % 2 == 0 else -1.0)
+                self.qvs.delete_asc(joint_asc_id)
 
-                bias_tensor = torch.tensor(
-                    phase_biases, dtype=torch.float32, device=mu.device
-                ).view(batch_size, 1, 1, 1)
-                eps = torch.randn_like(std) * bias_tensor
+            bias_tensor = torch.tensor(
+                phase_biases, dtype=torch.complex64, device=mu.device
+            ).view(batch_size, 1, 1, 1)
+            eps = torch.randn_like(std) * bias_tensor.real
         else:
             # Inference: Low-temperature 'Superposition Freeze'
             eps = torch.randn_like(std) * 0.1

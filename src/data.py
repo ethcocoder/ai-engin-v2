@@ -61,10 +61,10 @@ def get_dataloaders(
             root=root, train=False, download=True, transform=test_transform
         )
 
-    # TPU Stability Handle: Force 0 workers if running on XLA
+    # TPU Speed Run: Allow multiple workers to feed the TPU pipeline
     _is_tpu = 'PJRT_DEVICE' in os.environ or 'TPU_NAME' in os.environ
-    if _is_tpu:
-        num_workers = 0
+    if _is_tpu and num_workers == 0:
+        num_workers = 8 # Balanced for Colab/TPU host
         
     _persistent = num_workers > 0
     trainloader = DataLoader(
