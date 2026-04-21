@@ -47,10 +47,10 @@ class ResBlock(nn.Module):
         super().__init__()
         self.conv = nn.Sequential(
             nn.Conv2d(channels, channels, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(channels),
+            nn.GroupNorm(4, channels, eps=1e-4),
             nn.ReLU(inplace=True),
             nn.Conv2d(channels, channels, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(channels),
+            nn.GroupNorm(4, channels, eps=1e-4),
         )
         self.relu = nn.ReLU(inplace=True)
 
@@ -79,22 +79,22 @@ class SemanticEncoder(nn.Module):
         self.layers = nn.Sequential(
             # 3 → 32 ch, spatial /2
             nn.Conv2d(3, 32, kernel_size=4, stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(32),
+            nn.GroupNorm(4, 32, eps=1e-4),
             nn.ReLU(inplace=True),
             ResBlock(32),
             # 32 → 64 ch, spatial /2
             nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(64),
+            nn.GroupNorm(4, 64, eps=1e-4),
             nn.ReLU(inplace=True),
             ResBlock(64),
             # 64 → 128 ch, spatial /2
             nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(128),
+            nn.GroupNorm(4, 128, eps=1e-4),
             nn.ReLU(inplace=True),
             ResBlock(128),
             # 128 → 256 ch, spatial /2 [New HD Stage]
             nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1, bias=False),
-            nn.BatchNorm2d(256),
+            nn.GroupNorm(4, 256, eps=1e-4),
             nn.ReLU(inplace=True),
             ResBlock(256),
         )
@@ -132,7 +132,7 @@ class GenesisDecoder(nn.Module):
         # Expand latent to rich 256-channel manifold
         self.expand = nn.Sequential(
             nn.Conv2d(latent_channels, 256, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(256),
+            nn.GroupNorm(4, 256, eps=1e-4),
             nn.ReLU(inplace=True),
             ResBlock(256),
             ResBlock(256),
@@ -145,7 +145,7 @@ class GenesisDecoder(nn.Module):
         self.up1 = nn.Sequential(
             nn.Conv2d(256, 256, kernel_size=3, padding=1, bias=False),
             nn.PixelShuffle(2),
-            nn.BatchNorm2d(64),
+            nn.GroupNorm(4, 64, eps=1e-4),
             nn.ReLU(inplace=True),
             ResBlock(64),
         )
@@ -153,7 +153,7 @@ class GenesisDecoder(nn.Module):
         self.up2 = nn.Sequential(
             nn.Conv2d(64, 256, kernel_size=3, padding=1, bias=False),
             nn.PixelShuffle(2),
-            nn.BatchNorm2d(64),
+            nn.GroupNorm(4, 64, eps=1e-4),
             nn.ReLU(inplace=True),
             ResBlock(64),
         )
@@ -161,7 +161,7 @@ class GenesisDecoder(nn.Module):
         self.up3 = nn.Sequential(
             nn.Conv2d(64, 256, kernel_size=3, padding=1, bias=False),
             nn.PixelShuffle(2),
-            nn.BatchNorm2d(64),
+            nn.GroupNorm(4, 64, eps=1e-4),
             nn.ReLU(inplace=True),
             ResBlock(64),
         )
@@ -169,7 +169,7 @@ class GenesisDecoder(nn.Module):
         self.up4 = nn.Sequential(
             nn.Conv2d(64, 48, kernel_size=3, padding=1, bias=False),
             nn.PixelShuffle(2),
-            nn.BatchNorm2d(12),
+            nn.GroupNorm(4, 12, eps=1e-4),
             nn.ReLU(inplace=True),
             nn.Conv2d(12, 3, kernel_size=3, padding=1),
             nn.Tanh(),
@@ -237,8 +237,9 @@ class LatentGenesisCore(nn.Module):
         batch_size = mu.shape[0]
         
         # --- Paradox NaN-Shield ---
-        # Clamp log-variance to prevent exponential explosions
-        logvar = torch.clamp(logvar, -10.0, 10.0)
+        # Clamp log-variance to prevent exponential explosions natively on BF16
+        # Elite Upgrade: 10.0 is astronomically large for a VAE. Tightened to 4.0 to secure stability.
+        logvar = torch.clamp(logvar, -10.0, 4.0)
         std = torch.exp(0.5 * logvar)
         
         # --- Paradox TPU-Optimization Check ---
