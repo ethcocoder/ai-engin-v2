@@ -6,10 +6,18 @@ it EXCLUSIVELY on native high-resolution imagery to learn high-frequency
 textures and eliminate blur.
 """
 
+import sys
 import os
 import argparse
 import urllib.request
 import tarfile
+from pathlib import Path
+
+# --- Advanced Pathing Protocol ---
+_SRC_DIR = Path(__file__).resolve().parent
+if str(_SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(_SRC_DIR))
+
 import torch
 import torch.nn as nn
 import torch.optim as optim

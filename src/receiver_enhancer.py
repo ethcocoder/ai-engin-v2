@@ -1,14 +1,11 @@
-"""
-receiver_enhancer.py — Paradox ESRGAN (Team B - Sovereign Bespoke Edition)
-==========================================================================
-Engineered explicitly for hyper-rapid 20-Epoch 16KB texture hallucination.
-Deploys Gram-Matrix Style Fusion and High-Frequency Edge Extraction to 
-shatter the L1 blur-trap and evade VGG worm artifacts permanently.
-"""
-
+import sys
 import os
-os.environ['XLA_USE_BF16'] = '0'
-os.environ['XLA_DOWNCAST_BF16'] = '0'
+from pathlib import Path
+
+# --- Advanced Pathing Protocol ---
+_SRC_DIR = Path(__file__).resolve().parent
+if str(_SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(_SRC_DIR))
 
 import argparse
 import urllib.request
@@ -24,12 +21,8 @@ import matplotlib.pyplot as plt
 
 from model import LatentGenesisCore
 from finetune_tpu import FastHDDataset, download_div2k
+from qau_qvs.core.qvs import QVS
 import torchvision.models as models
-
-try:
-    from qau_qvs.core.qvs import QVS
-except ImportError:
-    from .qau_qvs.core.qvs import QVS
 
 try:
     import torch_xla

@@ -5,7 +5,15 @@ Optimized for Single-Node TPU v5e-1 (Colab PJRT Runtime).
 Bypasses the cluster address mismatch by using Direct Synthesis.
 """
 
+import sys
 import os
+from pathlib import Path
+
+# --- Advanced Pathing Protocol ---
+_SRC_DIR = Path(__file__).resolve().parent
+if str(_SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(_SRC_DIR))
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
