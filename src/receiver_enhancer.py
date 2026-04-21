@@ -137,22 +137,11 @@ class FastAttentionBlock(nn.Module):
         res = res + (res - blurred) * 0.5 # Sharpening boost
         
         # QUANTUM-STOCHASTIC SUPERPOSITION:
-        # We use the QVS to peek into the 16KB space by running 
-        # trajectory simulations natively on the target device.
-        batch_size = x.size(0)
-        with torch.no_grad():
-            noise_list = []
-            for i in range(batch_size):
-                # Create a local quantum state
-                asc_id = self.qvs.create_asc(size=1)
-                # Poll 10 possible realities using TPU-Accelerated Trajectories
-                probs = self.qvs.run_trajectories(asc_id, trials=10)
-                # Convert outcomes to a probabilistic bias
-                bias = sum([outcome[0] * prob for outcome, prob in probs.items()])
-                noise_list.append(torch.randn_like(res[i]) + bias)
-                self.qvs.delete_asc(asc_id)
-            noise = torch.stack(noise_list)
-
+        # Vectorized path. 100% TPU-accelerated Trajectories.
+        intensities = torch.mean(res, dim=(1, 2, 3))
+        batch_bias = self.qvs.batch_run_trajectories(intensities, trials=10)
+        
+        noise = torch.randn_like(res) + batch_bias.view(-1, 1, 1, 1)
         res = res + (noise * self.noise_scale)
         
         res = self.conv2(res)

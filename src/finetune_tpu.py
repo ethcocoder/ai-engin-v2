@@ -37,7 +37,9 @@ try:
     import torch_xla.distributed.parallel_loader as pl
     os.environ['PJRT_DEVICE'] = 'TPU'
     os.environ['XRT_TPU_CONFIG'] = "localservice;0;localhost:51011"
-    os.environ['XLA_USE_BF16'] = '1'
+    # Paradox Stability Guard: Disable Auto-BF16 to prevent Mixed-Precision crashes 
+    os.environ['XLA_USE_BF16'] = '0'
+    os.environ['XLA_DOWNCAST_BF16'] = '0'
     TPU_AVAILABLE = True
 except ImportError:
     TPU_AVAILABLE = False

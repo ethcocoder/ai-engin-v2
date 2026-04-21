@@ -32,7 +32,10 @@ try:
     os.environ['XRT_TPU_CONFIG'] = "localservice;0;localhost:51011"
     
     # --- Paradox Speed Boost (2x Multiply) ---
-    os.environ['XLA_USE_BF16'] = '1'
+    # Paradox Stability Guard: Disable Auto-BF16 to prevent Mixed-Precision crashes 
+    # in BatchNorm and maintain high-frequency texture fidelity.
+    os.environ['XLA_USE_BF16'] = '0'
+    os.environ['XLA_DOWNCAST_BF16'] = '0'
     
     TPU_AVAILABLE = True
 except ImportError:

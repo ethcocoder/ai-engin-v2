@@ -59,6 +59,9 @@ class NCB:
         # SVD on TPU
         _, S, _ = torch.linalg.svd(mat)
         
-        probs = torch.abs(S)**2
-        probs = probs[probs > 1e-15]
-        return float(-torch.sum(probs * torch.log2(probs)))
+        probs = torch.abs(S).pow(2).to(torch.float32)
+        mask = probs > 1e-8
+        safe_probs = probs * mask.to(probs.dtype)
+        # Avoid log(0)
+        entropy = -torch.sum(safe_probs * torch.log2(safe_probs + 1e-10))
+        return float(entropy)

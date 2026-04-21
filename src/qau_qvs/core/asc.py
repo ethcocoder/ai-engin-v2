@@ -34,9 +34,10 @@ class ASC:
 
     def normalize(self) -> "ASC":
         """Renormalize so sum(|alpha|^2) == 1."""
+        # TPU SAFETY: Avoid Python-level 'if' on tensors. 
+        # Use epsilon-division to stay within XLA float32 manifold.
         norm = torch.norm(self.vec)
-        if norm > 1e-15:
-            self.vec = self.vec / norm
+        self.vec = self.vec / (norm + 1e-8)
         return self
 
     def prune(self, threshold: float = 1e-12) -> "ASC":

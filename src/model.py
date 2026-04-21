@@ -245,26 +245,15 @@ class LatentGenesisCore(nn.Module):
         std = torch.exp(0.5 * logvar)
         
         if self.training:
-            # Quantum-Sovereign Reparameterization:
-            # We now use the Batch-Optimized QVS logic directly on TPU/GPU hardware.
-            phase_biases = []
-            for i in range(batch_size):
-                # Create and Entangle the 16KB manifold
-                asc_id_a = self.qvs.create_asc(size=1)
-                asc_id_b = self.qvs.create_asc(size=1)
-                joint_asc_id = self.qvs.BOND(asc_id_a, asc_id_b, bond_type="bell")
-                
-                # Weave Phase and Collapse
-                intensity = torch.mean(mu[i]).item()
-                self.qvs.WEAVE(joint_asc_id, phase_angle=intensity * np.pi)
-                outcome = self.qvs.COLLAPSE(joint_asc_id)
-                phase_biases.append(1.0 if sum(outcome) % 2 == 0 else -1.0)
-                self.qvs.delete_asc(joint_asc_id)
-
-            bias_tensor = torch.tensor(
-                phase_biases, dtype=torch.complex64, device=mu.device
-            ).view(batch_size, 1, 1, 1)
-            eps = torch.randn_like(std) * bias_tensor.real
+            # ── Vectorized Sovereign Path ─────────────────────────────────────
+            # We determine the entire batch's intensity in a single TPU operation.
+            intensities = torch.mean(mu, dim=(1, 2, 3)) # (B,)
+            
+            # Use the Batch-Optimized QVS logic (No Sync Points)
+            phase_biases = self.qvs.batch_run_trajectories(intensities)
+            
+            bias_tensor = phase_biases.view(batch_size, 1, 1, 1).to(mu.device)
+            eps = torch.randn_like(std) * bias_tensor
         else:
             # Inference: Low-temperature 'Superposition Freeze'
             eps = torch.randn_like(std) * 0.1
