@@ -58,34 +58,38 @@ class SovereignAntiGridEngine(nn.Module):
 
 class SovereignAestheticEngine(nn.Module):
     """
-    Sovereign RRM (Relative-Rank) Engine.
-    Matches visual ratios to prevent chromatic displacement (Purple Haze).
+    Sovereign Anchored Aesthetic Engine.
+    Combines Relative-Rank matching with Geometric Discipline.
     """
     def __init__(self, device):
         super().__init__()
         self.mse = nn.MSELoss()
+        # Geometric Anchors (Fixed 1-pixel rulers)
+        self.sobel_x = torch.tensor([[[[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]]]], dtype=torch.float32, device=device)
+        self.sobel_y = torch.tensor([[[[-1, -2, -1], [0, 0, 0], [1, 2, 1]]]], dtype=torch.float32, device=device)
 
     def forward(self, fake, real):
-        # 1. Relative-Rank Match (RRM)
-        # Fixes Purple Haze by focusing on local intensity RATIOS.
         f_gray = fake.mean(dim=1, keepdim=True)
         r_gray = real.mean(dim=1, keepdim=True)
-        
+
+        # 1. Geometric Anchor (Fixes Skyscraper Wiggling)
+        f_dx = F.conv2d(F.pad(f_gray, (1,1,1,1), mode='reflect'), self.sobel_x)
+        f_dy = F.conv2d(F.pad(f_gray, (1,1,1,1), mode='reflect'), self.sobel_y)
+        r_dx = F.conv2d(F.pad(r_gray, (1,1,1,1), mode='reflect'), self.sobel_x)
+        r_dy = F.conv2d(F.pad(r_gray, (1,1,1,1), mode='reflect'), self.sobel_y)
+        loss_anchor = self.mse(f_dx, r_dx) + self.mse(f_dy, r_dy)
+
+        # 2. RRM Ratio Match
         f_diff_h = f_gray[:, :, 1:, :] - f_gray[:, :, :-1, :]
         f_diff_w = f_gray[:, :, :, 1:] - f_gray[:, :, :, :-1]
         r_diff_h = r_gray[:, :, 1:, :] - r_gray[:, :, :-1, :]
         r_diff_w = r_gray[:, :, :, 1:] - r_gray[:, :, :, :-1]
-        
         loss_rank = self.mse(f_diff_h, r_diff_h) + self.mse(f_diff_w, r_diff_w)
 
-        # 2. Chromatic Gravity (Atomic Color Lock)
-        # Pulls excessive color shifts back to the gray baseline
-        loss_gravity = torch.mean(torch.abs(fake.mean(dim=1, keepdim=True) - fake))
+        # 3. Dynamic Contrast Lock
+        loss_contrast = torch.abs(fake.mean() - real.mean()) + torch.abs(fake.std() - real.std())
 
-        # 3. Micro-Texture Saliency (Energy Recovery)
-        loss_energy = torch.mean(torch.abs(fake.std(dim=(2,3)) - real.std(dim=(2,3))))
-        
-        return (loss_rank * 50.0) + (loss_gravity * 10.0) + (loss_energy * 20.0)
+        return (loss_anchor * 100.0) + (loss_rank * 20.0) + (loss_contrast * 10.0)
 
 class EliteFeatureEngine(nn.Module):
     """
@@ -235,9 +239,18 @@ class EliteHallucinator(nn.Module):
     def forward(self, x):
         feat = self.conv_first(x)
         
-        # --- SEI PARADIGM ---
-        # Introduce stochastic jitter as a texture template
-        jitter = torch.randn_like(feat) * self.sei_strength
+        # --- SALIENCY-GATED SEI PARADIGM ---
+        # We only inject noise where the image has 'Structural Complexity'.
+        # This prevents blobs in smoke/sky while allowing needles in trees.
+        with torch.no_grad():
+            gray = x.mean(dim=1, keepdim=True)
+            # Find complexity (edges/textures)
+            complexity = torch.abs(gray[:, :, 1:, :] - gray[:, :, :-1, :]).mean(dim=2, keepdim=True)
+            complexity = F.interpolate(complexity, size=feat.shape[2:], mode='bilinear', align_corners=False)
+            # Normalize to [0, 1]
+            gate = (complexity - complexity.min()) / (complexity.max() - complexity.min() + 1e-8)
+            
+        jitter = (torch.randn_like(feat) * self.sei_strength) * gate
         feat = feat + jitter
         
         trunk = self.trunk(feat)
