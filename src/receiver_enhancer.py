@@ -58,38 +58,38 @@ class SovereignAntiGridEngine(nn.Module):
 
 class SovereignAestheticEngine(nn.Module):
     """
-    Sovereign Anchored Aesthetic Engine.
-    Combines Relative-Rank matching with Geometric Discipline.
+    Sovereign Isotropic Apex Engine.
+    Engineered for Direction-Neutral Sharpness and Chromatic Truth.
     """
     def __init__(self, device):
         super().__init__()
         self.mse = nn.MSELoss()
-        # Geometric Anchors (Fixed 1-pixel rulers)
-        self.sobel_x = torch.tensor([[[[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]]]], dtype=torch.float32, device=device)
-        self.sobel_y = torch.tensor([[[[-1, -2, -1], [0, 0, 0], [1, 2, 1]]]], dtype=torch.float32, device=device)
+        # Circular Laplacian for Isotropic (Direction-Neutral) Sharpness
+        self.laplacian = torch.tensor([[[[1, 4, 1], [4, -20, 4], [1, 4, 1]]]], dtype=torch.float32, device=device)
 
     def forward(self, fake, real):
         f_gray = fake.mean(dim=1, keepdim=True)
         r_gray = real.mean(dim=1, keepdim=True)
 
-        # 1. Geometric Anchor (Fixes Skyscraper Wiggling)
-        f_dx = F.conv2d(F.pad(f_gray, (1,1,1,1), mode='reflect'), self.sobel_x)
-        f_dy = F.conv2d(F.pad(f_gray, (1,1,1,1), mode='reflect'), self.sobel_y)
-        r_dx = F.conv2d(F.pad(r_gray, (1,1,1,1), mode='reflect'), self.sobel_x)
-        r_dy = F.conv2d(F.pad(r_gray, (1,1,1,1), mode='reflect'), self.sobel_y)
-        loss_anchor = self.mse(f_dx, r_dx) + self.mse(f_dy, r_dy)
+        # 1. Isotropic Sharpness (Kills Horizontal Streaking)
+        f_lap = F.conv2d(F.pad(f_gray, (1,1,1,1), mode='reflect'), self.laplacian)
+        r_lap = F.conv2d(F.pad(r_gray, (1,1,1,1), mode='reflect'), self.laplacian)
+        loss_iso = self.mse(f_lap, r_lap)
 
-        # 2. RRM Ratio Match
-        f_diff_h = f_gray[:, :, 1:, :] - f_gray[:, :, :-1, :]
-        f_diff_w = f_gray[:, :, :, 1:] - f_gray[:, :, :, :-1]
-        r_diff_h = r_gray[:, :, 1:, :] - r_gray[:, :, :-1, :]
-        r_diff_w = r_gray[:, :, :, 1:] - r_gray[:, :, :, :-1]
-        loss_rank = self.mse(f_diff_h, r_diff_h) + self.mse(f_diff_w, r_diff_w)
+        # 2. Shadow-Chroma Lock (Kills Brown Water)
+        # Forbids warm energy in cool shadows
+        shadow_mask = torch.exp(-r_gray * 8.0)
+        loss_shadow = torch.mean(torch.abs(fake[:, 0, :, :] - real[:, 0, :, :]) * shadow_mask.squeeze(1))
 
-        # 3. Dynamic Contrast Lock
-        loss_contrast = torch.abs(fake.mean() - real.mean()) + torch.abs(fake.std() - real.std())
+        # 3. Atmos-Glow Protector (Smooth Skies)
+        loss_glow = torch.abs(fake.mean(dim=(2,3)) - real.mean(dim=(2,3))).mean()
+        
+        # 4. Global Structural Rank
+        f_std = fake.std(dim=(2,3))
+        r_std = real.std(dim=(2,3))
+        loss_energy = self.mse(f_std, r_std)
 
-        return (loss_anchor * 100.0) + (loss_rank * 20.0) + (loss_contrast * 10.0)
+        return (loss_iso * 80.0) + (loss_shadow * 30.0) + (loss_glow * 10.0) + (loss_energy * 20.0)
 
 class EliteFeatureEngine(nn.Module):
     """
