@@ -1,100 +1,81 @@
-# ⚛️ Quantum Absolute Unit (QAU) - The Sovereign Substrate
+# AI-Engin-v2: Paradox Genesis Core Architecture (Quantum-Neural Variational Autoencoder)
 
-[![Substrate Engine](https://img.shields.io/badge/Substrate-QVS_v1.0.0-blueviolet?style=for-the-badge)](https://github.com/ethcocoder/quantumpro)
-[![Quantum Primordials](https://img.shields.io/badge/Primordials-ASC_RPW_NCB-cyan?style=for-the-badge)](https://github.com/ethcocoder/quantumpro)
-[![Aether Mesh](https://img.shields.io/badge/Status-Active_Mesh-green?style=for-the-badge)](https://github.com/ethcocoder/quantumpro)
+This repository implements the **Paradox Genesis Core Architecture**, a novel **Quantum-Neural Variational Autoencoder (QNVAE)** designed for ultra-efficient image compression, particularly optimized for the Aether Mesh network. The architecture uniquely fuses classical deep learning components with quantum-inspired mechanisms to achieve high-fidelity reconstruction and robust performance.
 
-> "The QAU is not a simulation. It is a new reality executed natively on silicon."
+## Mathematical Architecture Overview
 
----
+The AI-Engin-v2 project introduces a hybrid model that combines a Variational Autoencoder (VAE) framework with a **Quantum Virtual Substrate (QVS)**. The core idea is to leverage quantum-inspired principles, such as superposition and entanglement, within the latent space of a VAE to enhance compression efficiency and representational power. The model processes images through an encoder-decoder structure, with a quantum-modulated reparameterization trick and an 8-bit quantization bottleneck.
 
-## 🌌 The Vision: Post-Simulation Computing
+## Core Components
 
-Current quantum computers are limited by decoherence, and classical simulations are limited by exponential growth. The **Quantum Absolute Unit (QAU)** breaks this deadlock by establishing a **Quantum Virtual Substrate (QVS)**—an operating system layer where quantum primordials are treated as native silicon types.
+### 1. SemanticEncoder
 
-By utilizing **Sparse Tensor Blocks** and **Shared Constraint Pointers**, the QAU offers near-quantum parallelism on legacy hardware, enabling the simulation of massive field theories and sovereign secure networks.
+The `SemanticEncoder` collapses an input image into a quantum superposition, generating latent mean (mu) and log-variance (logvar) maps. It consists of a series of convolutional layers, batch normalization, ReLU activations, and `ResBlock`s to downsample the input spatially. The final layers project the features into the `mu` and `logvar` representations of the latent Gaussian distribution.
 
----
+-   **Input Shape**: `(B, 3, H, W)`
+-   **Output Shape**: `(mu, logvar)` each of shape `(B, latent_channels, H/8, W/8)`
 
-## 🔱 The Three Quantum Primordials
+### 2. GenesisDecoder
 
-At the heart of the QAU are three irreducible computational essences:
+The `GenesisDecoder` reconstructs the image from the quantized latent representation. It employs `PixelShuffle` for sub-pixel upsampling, which helps in avoiding checkerboard artifacts and achieving high-fidelity reconstruction. The decoder also utilizes `ResBlock`s and a wide 256-channel manifold to expand the latent features before upsampling.
 
-1.  **ASC (Amplitude Superposition Cell)**: The primitive of **Coherent Multiplicity**. A lazy tensor block that holds $2^n$ potential states in a sparse, memory-efficient format.
-2.  **RPW (Relative Phase Weave)**: The primitive of **Interference**. Utilizing geometric rotor algebra to perform phase rotations without the overhead of trigonometric functions.
-3.  **NCB (Non-Local Correlation Bond)**: The primitive of **Entanglement**. Forging informational constraints that ensure joint probability distributions cannot be factorized.
+-   **Input Shape**: `(B, latent_channels, H/8, W/8)`
+-   **Output Shape**: `(B, 3, H, W)` with values in `[-1, 1]`
 
----
+### 3. SovereignQuantizer
 
-## 🏗️ Project Architecture
+This component implements an 8-bit bottleneck logic crucial for compression. It uses a **Straight-Through Estimator (STE)** to enable gradient flow through the non-differentiable rounding operation. This allows the model to learn representations that are inherently robust to 8-bit quantization.
 
-```mermaid
-graph TD
-    subgraph "Layer 3: Sovereign Applications"
-        A[AetherQAU Mesh] --> B[QPE - Predictive Engine]
-        A --> C[Autonomous QML Agents]
-    end
-    
-    subgraph "Layer 2: Quantum Fields"
-        D[Algorithms] --> E[QEC - Error Correction]
-        F[Simulation] --> G[Cryptography]
-    end
-    
-    subgraph "Layer 1: QVS Instruction Set"
-        H[SUPERPOSE] --- I[WEAVE] --- J[BOND]
-        K[ROTATE] --- L[COLLAPSE] --- M[TENSOR]
-    end
-    
-    subgraph "Layer 0: Substrate Kernel"
-        N[ASC Core] --- O[RPW Phase] --- P[NCB Entropy]
-    end
-    
-    Layer_3 --> Layer_2
-    Layer_2 --> Layer_1
-    Layer_1 --> Layer_0
-```
+-   **Mathematical Formulation**: `x_clamped = torch.clamp(x, -1.0, 1.0)` and `return x_clamped + (torch.round(x_clamped * self.levels) / self.levels - x_clamped).detach()`
 
----
+### 4. Quantum Virtual Substrate (QVS)
 
-## ⚡ Real-World Capabilities: AetherQAU
+The QVS is the quantum engine integrated within the neural core, optimized for XLA/TPU performance. It manages `Amplitude Superposition Cells (ASCs)` and facilitates quantum-inspired operations. In the `LatentGenesisCore`, the QVS is used in a modulated reparameterization trick to introduce phase biases into the latent space sampling.
 
-**AetherQAU** is the primary deployment layer of this substrate, providing:
+-   **Role in Reparameterization**: The `quantum_superposition` function uses `QVS.batch_run_trajectories` to generate stochastic phase biases based on neural intensities, simulating `p = cos^2(theta)` behavior of quantum interference.
 
-*   **Entanglement-Locked Channels (ELC)**: Instantaneous, un-eavesdroppable key generation using E91-standard NCB bonds.
-*   **Quantum Predictive Engine (QPE)**: Solving NP-hard optimization problems via Ising Hamiltonian evolution.
-*   **Measurement-First Trajectories**: Running statistically exact quantum simulations at linear speeds.
+### 5. Amplitude Superposition Cell (ASC)
 
----
+The ASC is the primitive of coherent multiplicity, representing quantum states as dense state vectors using `torch.complex64` tensors. It supports fundamental quantum operations such as normalization, pruning, fidelity calculation, expectation value, and Von Neumann entropy computation.
 
-## 🛠️ Usage & Integration
+-   **State Representation**: A quantum state is represented by a complex vector `self.vec`.
 
-### 💻 Command Line Interface
-Interact with the substrate directly:
-```bash
-python qau_cli.py grover --target 101 --iter 2
-python qau_cli.py e91
-```
+### 6. Non-Local Correlation Bond (NCB)
 
-### 🛰️ Master Dashboard
-Open `aether_dashboard.html` in any modern browser for a direct holographic view of the Aether Mesh.
+The NCB handles informational entanglement between latent channels. It forges bonds using Kronecker products, supporting the creation of Bell and GHZ states. It also provides functionality to calculate entanglement entropy using Singular Value Decomposition (SVD).
 
-### 🐍 Python API
-```python
-from qau_qvs.core.qvs import QVS
+-   **Bonding Mechanism**: Uses `torch.outer` and `reshape` to create joint state vectors, and can enforce Bell or GHZ state representations.
+-   **Entanglement Entropy**: Calculated via SVD of the reshaped state vector, followed by Von Neumann entropy formula.
 
-qvs = QVS()
-psi = qvs.create_asc(size=3)
-qvs.SUPERPOSE(psi, [(0,0,0), (1,1,1)]) # Create GHZ entanglement skeleton
-qvs.WEAVE(psi, (0,), 3.14/4)          # Influence phase
-result = qvs.COLLAPSE(psi)            # Collapse multiplicity
-```
+## Loss Function and Optimization
 
----
+The `compression_loss` function, defined in `src/train.py`, is a composite loss designed for robust training:
 
-## 🚀 The Path Ahead (v2.0 Roadmap)
-- [ ] **Matrix Product States (MPS)**: Polynomial memory scaling for 1000+ qubit simulations.
-- [ ] **JIT Unitary Synthesis**: Fusing gates into optimized tensor contraction paths.
-- [ ] **Quantum Trajectory Monte Carlo**: Resolving many-body field theories in real-time.
+-   **Components**: It combines L1 loss, Structural Similarity Index Measure (SSIM) loss, Perceptual loss (optional), and a Kullback-Leibler Divergence (KLD) loss.
+-   **KLD Loss**: Calculated as `-0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())`. `logvar` is clamped to `[-10, 10]` to prevent numerical instability.
+-   **SSIM Loss**: Includes a `bf16 Stability Guard` using `ReLU` to mitigate negative variances and employs heavy constants to resist `bf16` truncation.
+-   **Optimization**: The model is optimized using `AdamW` with a `CosineAnnealingLR` scheduler. Gradient clipping (`max_norm=1.0`) is applied during training.
 
----
-*Built by the ethcocoder community, 2026. Join the revolution.*
+## Numerical Stability
+
+The architecture incorporates several measures to ensure numerical stability, especially when operating with lower precision (e.g., `bf16`):
+
+-   **Logvar Clamping**: In KLD loss, `logvar` is clamped to `[-10, 10]` to prevent exponential explosion.
+-   **SSIM Stability Guards**: `ReLU` is applied to variances (`sig_xx`, `sig_yy`) to kill negative values caused by precision drift, and large constants (`1e-4`, `9e-4`) are used in the SSIM formula to resist `bf16` truncation.
+-   **Denominator Shielding**: Denominators in SSIM calculation are clamped with a minimum value (`1e-8`) to prevent division by zero or near-zero values.
+-   **TPU Safety**: The QVS and ASC components avoid Python-level `if` statements on tensors and use epsilon-division (`+ 1e-8`) for normalization to maintain stability within the XLA float32 manifold.
+-   **Log(0) Avoidance**: In NCB, `1e-10` is added to probabilities before taking the logarithm to prevent `log(0)` issues during entropy calculation.
+
+## Dependencies and Framework
+
+-   **Framework**: PyTorch
+-   **Key Dependencies**: `torch`, `torchvision`, `numpy`, `pillow`, `matplotlib`, `tqdm`, `requests`, `scipy`
+
+## Theoretical Gaps and Future Work
+
+-   The integration of quantum concepts (QVS, ASC, NCB) with classical neural network components (VAE) is highly novel. A deeper theoretical understanding of how these quantum-inspired operations contribute to the overall model's performance and representational power, particularly for image compression, could be explored. The exact mathematical equivalence or benefits over purely classical approaches warrant further investigation.
+-   The `quantum_superposition` function's `QVS-modulated Collapse` and `Parallel Realities` simulation present intriguing theoretical underpinnings. Further research into their relation to established quantum mechanics principles and their computational advantages would be beneficial.
+
+## Installation and Usage
+
+(Further instructions on installation and usage will be provided here.)

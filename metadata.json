@@ -1,0 +1,180 @@
+{
+  "project_name": "ai-engin-v2",
+  "model_type": "hybrid",
+  "files_scanned": [
+    "/home/ubuntu/ai-engin-v2/src/__init__.py",
+    "/home/ubuntu/ai-engin-v2/src/aether_qau.py",
+    "/home/ubuntu/ai-engin-v2/src/data.py",
+    "/home/ubuntu/ai-engin-v2/src/demo_hd.py",
+    "/home/ubuntu/ai-engin-v2/src/finetune_tpu.py",
+    "/home/ubuntu/ai-engin-v2/src/hd_data.py",
+    "/home/ubuntu/ai-engin-v2/src/model.py",
+    "/home/ubuntu/ai-engin-v2/src/p2p_sim.py",
+    "/home/ubuntu/ai-engin-v2/src/qau_cli.py",
+    "/home/ubuntu/ai-engin-v2/src/qau_qvs/__init__.py",
+    "/home/ubuntu/ai-engin-v2/src/qau_qvs/core/__init__.py",
+    "/home/ubuntu/ai-engin-v2/src/qau_qvs/core/asc.py",
+    "/home/ubuntu/ai-engin-v2/src/qau_qvs/core/legacy_bridge.py",
+    "/home/ubuntu/ai-engin-v2/src/qau_qvs/core/ncb.py",
+    "/home/ubuntu/ai-engin-v2/src/qau_qvs/core/qvs.py",
+    "/home/ubuntu/ai-engin-v2/src/qau_qvs/core/rpw.py",
+    "/home/ubuntu/ai-engin-v2/src/qau_qvs/fields/__init__.py",
+    "/home/ubuntu/ai-engin-v2/src/qau_qvs/fields/quantum_fields.py",
+    "/home/ubuntu/ai-engin-v2/src/receiver_enhancer.py",
+    "/home/ubuntu/ai-engin-v2/src/telecom_demo.py",
+    "/home/ubuntu/ai-engin-v2/src/train.py",
+    "/home/ubuntu/ai-engin-v2/src/train_hd.py",
+    "/home/ubuntu/ai-engin-v2/src/train_tpu.py"
+  ],
+  "core_math": {
+    "forward_pass": {
+      "description": "The forward pass of the LatentGenesisCore involves encoding the input image into latent mean (mu) and log-variance (logvar) maps using SemanticEncoder. These are then passed through a QVS-modulated reparameterization trick (quantum_superposition) to sample a latent vector z. This latent vector is then quantized by SovereignQuantizer and finally decoded by GenesisDecoder to reconstruct the image.",
+      "source_file": "src/model.py",
+      "code": "    def forward(\n        self, x: torch.Tensor\n    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:\n        \"\"\"\n        Full encode \u2192 reparameterize \u2192 quantize \u2192 decode pipeline.\n\n        Args:\n            x: Input image batch, shape (B, 3, H, W), values in [-1, 1].\n\n        Returns:\n            reconstructed: Decoded image,  shape (B, 3, H, W).\n            mu:            Latent mean,    shape (B, C, H/16, W/16).\n            logvar:        Latent log-var, shape (B, C, H/16, W/16).\n        \"\"\"\n        mu, logvar = self.encoder(x)\n        z = self.quantum_superposition(mu, logvar)\n\n        # Apply 8-bit Sovereign Quantization (Compression Logic)\n        z_q = self.quantizer(z)\n\n        reconstructed = self.decoder(z_q)\n        return reconstructed, mu, logvar",
+      "input_shapes": {
+        "x": "(batch, 3, H, W)"
+      },
+      "output_shapes": {
+        "reconstructed": "(batch, 3, H, W)",
+        "mu": "(batch, latent_channels, H/8, W/8)",
+        "logvar": "(batch, latent_channels, H/8, W/8)"
+      }
+    },
+    "loss_function": {
+      "description": "The compression_loss function combines L1 loss, SSIM loss, Perceptual loss, and a Kullback-Leibler Divergence (KLD) loss. The KLD loss is calculated as -0.5 * mean(1 + logvar - mu^2 - exp(logvar)). Logvar is clamped to prevent explosion. SSIM loss includes a bf16 stability guard with ReLU for negative variances and heavy constants. The total loss is a weighted sum of these components.",
+      "source_file": "src/train.py",
+      "code": "def compression_loss(recon_x, x, mu, logvar, kld_weight=0.001, perc_model=None):\n    l1_l   = F.l1_loss(recon_x, x)\n    ssim_l = ssim_loss(recon_x, x)\n    \n    # --- Paradox Safety Protocol 1.1 ---\n    # Clamp logvar to prevent KLD explosion (e^10 is ~22k, enough for variance)\n    logvar_c = torch.clamp(logvar, -10, 10)\n    kld_l  = -0.5 * torch.mean(1 + logvar_c - mu.pow(2) - logvar_c.exp())\n    \n    perc_l = torch.tensor(0.0, device=x.device)\n    if perc_model is not None:\n        perc_l = perc_model(recon_x, x)\n    # Balanced weight for universal Generalization\n    total = l1_l + (0.5 * ssim_l) + (0.1 * perc_l) + (kld_weight * kld_l)\n    return total, l1_l, ssim_l, perc_l, kld_l",
+      "mathematical_properties": "Non-convex, differentiable (except for quantization in forward pass handled by STE)"
+    },
+    "optimization": {
+      "algorithm": "AdamW",
+      "source_file": "src/train.py",
+      "code": "    optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)\n    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)",
+      "learning_rate_schedule": "CosineAnnealingLR",
+      "gradient_clipping": true,
+      "weight_decay": "1e-4"
+    }
+  },
+  "attention_mechanism": {
+    "type": "none",
+    "complexity": "none",
+    "source_file": null,
+    "code": null,
+    "custom_modifications": null
+  },
+  "normalization": {
+    "type": "BatchNorm2d",
+    "source_files": [
+      "src/model.py"
+    ],
+    "code": "            nn.BatchNorm2d(channels)",
+    "where_applied": "pre-activation in ResBlock, after Conv2d in Encoder/Decoder",
+    "eps_value": "default (1e-5)"
+  },
+  "activation_functions": {
+    "names": [
+      "ReLU",
+      "Tanh"
+    ],
+    "source_files": [
+      "src/model.py"
+    ],
+    "code_snippets": {
+      "ReLU": "nn.ReLU(inplace=True)",
+      "Tanh": "nn.Tanh()"
+    }
+  },
+  "positional_encoding": {
+    "type": "none",
+    "max_sequence_length": null,
+    "source_file": null,
+    "code": null
+  },
+  "embedding_layers": {
+    "vocab_size": null,
+    "hidden_dim": null,
+    "source_file": null,
+    "code": null
+  },
+  "custom_components": [
+    {
+      "name": "Quantum Virtual Substrate (QVS)",
+      "purpose": "Optimized for XLA/TPU performance, it manages Amplitude Superposition Cells (ASCs) and performs quantum-inspired operations like superposition, weaving, bonding, and batch collapse. It is used in the reparameterization trick to introduce phase biases.",
+      "math_description": "The QVS introduces phase biases (phase_biases) into the reparameterization trick, calculated from intensities (mean of mu) using a quantum trajectory sampling approach. This involves simulating p = cos^2(theta) behavior of quantum interference with random seeds and thresholds.\n`phase_biases = self.qvs.batch_run_trajectories(intensities)`\n`eps = torch.randn_like(std) * bias_tensor`",
+      "source_file": "src/qau_qvs/core/qvs.py",
+      "code": "    def batch_run_trajectories(self, intensities: torch.Tensor, trials: int = 10) -> torch.Tensor:\n        \"\"\"\n        Hyper-Speed Quantum Trajectory Sampling.\n        Dynamic Device Detection (TPU/GPU/CPU).\n        \"\"\"\n        device = intensities.device\n        # Generate stochastic bias aligned with neural intensities\n        B = intensities.shape[0]\n        # Simulate p = cos^2(theta) behavior of quantum interference\n        random_seed = torch.rand(B, trials, device=device)\n        threshold = torch.cos(intensities.unsqueeze(-1) * np.pi).pow(2)\n        \n        # Parallel Realities\n        realities = torch.where(random_seed < threshold, 1.0, -1.0)\n        return realities.mean(dim=-1)",
+      "is_novel": true,
+      "resembles_standard": "Reparameterization trick, but with quantum-inspired modulation."
+    },
+    {
+      "name": "Amplitude Superposition Cell (ASC)",
+      "purpose": "The primitive of coherent multiplicity, representing quantum states as dense state vectors (torch.complex64 tensors) for TPU/GPU speed. It supports normalization, pruning, fidelity calculation, expectation value, and entropy calculation.",
+      "math_description": "A quantum state is represented by a complex vector `self.vec`. Operations include normalization (`self.vec = self.vec / (norm + 1e-8)`), density matrix (`rho = |psi><psi|`), fidelity (`|<self|other>|^2`), and Von Neumann entropy (`-sum(p log2 p)`).",
+      "source_file": "src/qau_qvs/core/asc.py",
+      "code": "class ASC:\n    \"\"\"\n    Amplitude Superposition Cell (ASC) - TPU Optimized v2.0\n    =======================================================\n    The primitive of COHERENT MULTIPLICITY.\n    \n    Now uses Torch Complex Tensors for massive speedup on TPU/GPU hardware.\n    \"\"\"\n\n    def __init__(self, amplitudes: Optional[Dict[Tuple, complex]] = None, size: Optional[int] = None, device: str = \"cpu\"):\n        self.size: int = size if size is not None else 0\n        self.device = device\n        dim = 2 ** self.size\n        \n        # Dense State Vector for TPU speed (Complex64)\n        self.vec = torch.zeros(dim, dtype=torch.complex64, device=device)\n        \n        if amplitudes:\n            for state, weight in amplitudes.items():\n                idx = sum(bit * (2 ** (self.size - 1 - i)) for i, bit in enumerate(state))\n                self.vec[idx] = weight\n        elif self.size > 0:\n            # Default to |0...0> ground state\n            self.vec[0] = 1.0 + 0j",
+      "is_novel": true,
+      "resembles_standard": "Quantum state representation and operations."
+    },
+    {
+      "name": "Non-Local Correlation Bond (NCB)",
+      "purpose": "Handles informational entanglement between latent channels by forging bonds using Kronecker products, supporting Bell and GHZ states. It also calculates entanglement entropy using SVD.",
+      "math_description": "Bonds are formed using Kronecker products (`torch.outer(vec_a, vec_b).reshape(-1)`). Entanglement entropy is calculated via SVD of the reshaped state vector: `_, S, _ = torch.linalg.svd(mat)`, then `entropy = -sum(p log2 p)` where `p` are squared singular values.",
+      "source_file": "src/qau_qvs/core/ncb.py",
+      "code": "    @staticmethod\n    def bond(asc_a: ASC, asc_b: ASC, bond_type: str = \"bell\") -> ASC:\n        \"\"\"\n        Forges a bond using Torch Kronecker products.\n        \"\"\"\n        device = asc_a.device\n        joint_size = asc_a.size + asc_b.size\n        \n        # 1. Base joint state (Tensor Product)\n        # torch.kron is available in recent torch versions or we can use outer + reshape\n        vec_a = asc_a.vec\n        vec_b = asc_b.vec\n        joint_vec = torch.outer(vec_a, vec_b).reshape(-1)\n        \n        # 2. Apply ENTAGLEMENT Logic directly on tensor\n        if bond_type == \"bell\":\n            if joint_size >= 2:\n                # Force into |00> + |11> state representation\n                new_vec = torch.zeros(2**joint_size, dtype=torch.complex64, device=device)\n                new_vec[0] = 0.7071 # |00...0>\n                # index for |110...0>\n                idx_11 = 3 * (2**(joint_size - 2))\n                new_vec[idx_11] = 0.7071\n                joint_vec = new_vec\n\n        elif bond_type == \"ghz\":\n            if joint_size >= 2:\n                new_vec = torch.zeros(2**joint_size, dtype=torch.complex64, device=device)\n                new_vec[0] = 0.7071\n                new_vec[-1] = 0.7071 # |11...1>\n                joint_vec = new_vec\n\n        res_asc = ASC(size=joint_size, device=device)\n        res_asc.vec = joint_vec\n        return res_asc.normalize()",
+      "is_novel": true,
+      "resembles_standard": "Quantum entanglement operations."
+    },
+    {
+      "name": "SovereignQuantizer",
+      "purpose": "Implements an 8-bit bottleneck logic using a Straight-Through Estimator (STE) to allow gradients to flow past the non-differentiable rounding operation, making the representation robust to 8-bit quantization.",
+      "math_description": "`x_clamped = torch.clamp(x, -1.0, 1.0)`\n`return x_clamped + (torch.round(x_clamped * self.levels) / self.levels - x_clamped).detach()`",
+      "source_file": "src/model.py",
+      "code": "class SovereignQuantizer(nn.Module):\n    \"\"\"\n    Paradox Sovereign Quantizer \u2014 the 8-bit bottleneck logic.\n\n    Uses a Straight-Through Estimator (STE) to allow gradients to flow past the\n    non-differentiable rounding operation. This enables the model to 'learn'\n    a representation that is natively robust to 8-bit quantization.\n\n    Args:\n        levels: Number of steps (127.5 for 8-bit [-1, 1]).\n    \"\"\"\n    def __init__(self, levels: float = 127.5) -> None:\n        super().__init__()\n        self.levels = levels\n\n    def forward(self, x: torch.Tensor) -> torch.Tensor:\n        # Straight-Through Estimator: round in forward, identity in backward\n        x_clamped = torch.clamp(x, -1.0, 1.0)\n        return x_clamped + (torch.round(x_clamped * self.levels) / self.levels - x_clamped).detach()",
+      "is_novel": false,
+      "resembles_standard": "Straight-Through Estimator for quantization."
+    }
+  ],
+  "numerical_concerns": {
+    "precision": "bf16 (inferred from stability guards), fp32, mixed",
+    "stability_tricks_found": [
+      "Clamping logvar in KLD loss (-10 to 10)",
+      "ReLU for negative variances in SSIM loss (bf16 stability guard)",
+      "Heavy constants (1e-4, 9e-4) for C1, C2 in SSIM to resist bf16 truncation",
+      "Denominator shielding in SSIM loss (`min=1e-8`)",
+      "TPU Safety: Avoid Python-level 'if' on tensors in QVS and ASC",
+      "Epsilon-division in ASC normalization (`norm + 1e-8`)",
+      "Avoiding log(0) in NCB entanglement entropy (`safe_probs * torch.log2(safe_probs + 1e-10)`)"
+    ],
+    "code": "    # bf16 Stability Guard: Use ReLU to kill negative variances caused by precision drift\n    sig_xx = F.relu(F.conv2d(x * x, window, padding=pad, groups=C_ch) - mu_x**2)\n    sig_yy = F.relu(F.conv2d(y * y, window, padding=pad, groups=C_ch) - mu_y**2)\n    sig_xy = F.conv2d(x * y, window, padding=pad, groups=C_ch) - mu_x*mu_y\n    # Heavy constants resistant to bf16 truncation\n    C1, C2 = 1e-4, 9e-4\n    \n    # Shield Denominator against NaN\n    denominator = torch.clamp((mu_x**2 + mu_y**2 + C1) * (sig_xx + sig_yy + C2), min=1e-8)"
+  },
+  "dependencies_and_framework": {
+    "framework": "PyTorch",
+    "key_dependencies": [
+      "torch",
+      "torchvision",
+      "numpy",
+      "pillow",
+      "matplotlib",
+      "tqdm",
+      "requests",
+      "scipy"
+    ],
+    "custom_kernels": []
+  },
+  "theoretical_gaps_or_questions": [
+    "The integration of 'quantum' concepts (QVS, ASC, NCB) with classical neural network components (VAE) is highly novel and requires a deeper theoretical understanding of how these quantum-inspired operations contribute to the overall model's performance and representational power, especially in the context of image compression. The exact mathematical equivalence or benefits over purely classical approaches could be further explored.",
+    "The 'quantum_superposition' function's 'QVS-modulated Collapse' and 'Parallel Realities' simulation warrant further investigation into their theoretical underpinnings and how they relate to established quantum mechanics principles or provide a computational advantage."
+  ],
+  "summary": {
+    "total_parameters": null,
+    "architecture_family": "Quantum-Neural Variational Autoencoder (QNVAE)",
+    "notable_features": [
+      "Quantum Virtual Substrate (QVS) for phase-modulated reparameterization",
+      "Amplitude Superposition Cells (ASC) for quantum state representation",
+      "Non-Local Correlation Bonds (NCB) for entanglement",
+      "8-bit Sovereign Quantization with Straight-Through Estimator",
+      "Hybrid classical-quantum architecture for ultra-efficient image compression",
+      "Robustness to bf16 precision issues with specific stability guards"
+    ]
+  }
+}
