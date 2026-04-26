@@ -1,0 +1,67 @@
+import torch
+from torch.optim import AdamW
+from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
+from torch.cuda.amp import GradScaler, autocast
+import torch.nn as nn
+
+from ..loss.rate_distortion import RateDistortionLoss
+from ..utils.ema import EMA
+
+def train_stage2(model, dataloader, epochs=100, device='cuda', ema=None):
+    """
+    Stage 2: Switch distortion to MS-SSIM. lambda=0.05. 
+    Freeze hyperprior, train main codec.
+    """
+    model.to(device)
+    model.train()
+    
+    # Freeze hyperprior
+    if model.use_hyperprior:
+        for param in model.hyperprior.parameters():
+            param.requires_grad = False
+            
+    criterion = RateDistortionLoss(lmbda=0.05, use_ms_ssim=True, use_lpips=False).to(device)
+    
+    # Train only main codec parameters (encoder, decoder, quantizer)
+    params_to_train = [p for n, p in model.named_parameters() if p.requires_grad]
+    optimizer = AdamW(params_to_train, lr=1e-4, betas=(0.9, 0.999), weight_decay=1e-4)
+    scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=50, T_mult=2)
+    scaler = GradScaler()
+    
+    if ema is None:
+        ema = EMA(model, decay=0.999)
+        
+    print("Starting Stage 2 Training...")
+    
+    for epoch in range(epochs):
+        epoch_loss = 0.0
+        for batch_idx, data in enumerate(dataloader):
+            x = data[0].to(device) if isinstance(data, (list, tuple)) else data.to(device)
+            
+            optimizer.zero_grad()
+            
+            with autocast():
+                x_hat, likelihoods, y = model(x, force_hard=False)
+                loss_dict = criterion(x, x_hat, likelihoods)
+                loss = loss_dict['loss']
+            
+            scaler.scale(loss).backward()
+            
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(params_to_train, max_norm=1.0)
+            
+            scaler.step(optimizer)
+            scaler.update()
+            
+            ema.update(model)
+            
+            epoch_loss += loss.item()
+            
+            if batch_idx % 100 == 0:
+                print(f"Epoch [{epoch+1}/{epochs}] Batch {batch_idx} Loss: {loss.item():.4f} "
+                      f"BPP: {loss_dict['bpp_loss'].item():.4f} D_Loss(MS-SSIM): {loss_dict['d_loss'].item():.4f}")
+                
+        scheduler.step()
+        print(f"Epoch {epoch+1} Completed. Avg Loss: {epoch_loss/len(dataloader):.4f}")
+        
+    return model, ema
