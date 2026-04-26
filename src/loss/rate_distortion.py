@@ -34,20 +34,19 @@ class RateDistortionLoss(nn.Module):
         num_pixels = N * H * W
         
         # 1. Rate (Bits Per Pixel)
-        # -log2(p) to get bits
+        # -log2(p) to get bits. Add epsilon to prevent log(0) -> NaN
         bpp_loss = 0.0
         for likelihood in likelihoods.values():
-            # likelihoods are probabilities, we convert to bits
-            bpp = torch.log(likelihood).sum() / (-math.log(2) * num_pixels)
+            bpp = torch.log(likelihood + 1e-9).sum() / (-math.log(2) * num_pixels)
             bpp_loss += bpp
             
         # 2. Distortion
         # L1 Loss
         d_loss = self.l1_loss(x, x_hat)
         
-        # MS-SSIM Loss
+        # MS-SSIM Loss (Data range is 2.0 because images are [-1, 1])
         if self.use_ms_ssim:
-            ms_ssim_val = ms_ssim(x, x_hat, data_range=1.0)
+            ms_ssim_val = ms_ssim(x, x_hat, data_range=2.0)
             d_loss += 0.5 * (1.0 - ms_ssim_val)
             
         # LPIPS Loss

@@ -32,8 +32,9 @@ def train_stage3(model, dataloader, epochs=50, device='cuda', ema=None):
     criterion = RateDistortionLoss(lmbda=0.1, use_ms_ssim=True, use_lpips=True).to(device)
     adv_criterion = AdversarialLoss().to(device)
     
-    opt_G = AdamW(model.parameters(), lr=1e-4, betas=(0.9, 0.999), weight_decay=1e-4)
-    opt_D = AdamW(discriminator.parameters(), lr=1e-4, betas=(0.9, 0.999), weight_decay=1e-4)
+    # Lower Learning Rate for Stage 3 Stability
+    opt_G = AdamW(model.parameters(), lr=2e-5, betas=(0.5, 0.9), weight_decay=1e-4)
+    opt_D = AdamW(discriminator.parameters(), lr=2e-5, betas=(0.5, 0.9), weight_decay=1e-4)
     
     scheduler_G = CosineAnnealingWarmRestarts(opt_G, T_0=50, T_mult=2)
     scheduler_D = CosineAnnealingWarmRestarts(opt_D, T_0=50, T_mult=2)
@@ -44,7 +45,7 @@ def train_stage3(model, dataloader, epochs=50, device='cuda', ema=None):
     if ema is None:
         ema = EMA(model, decay=0.999)
         
-    print("Starting Stage 3 Training...")
+    print("Starting Stage 3 Training (GAN Mode)...")
     
     for epoch in range(epochs):
         pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}")
@@ -61,10 +62,15 @@ def train_stage3(model, dataloader, epochs=50, device='cuda', ema=None):
                 fake_preds = discriminator(x_hat.detach())
                 
                 d_loss = adv_criterion.discriminator_loss(real_preds, fake_preds)
-                
+            
+            # NaN Check
+            if torch.isnan(d_loss):
+                print(f"Warning: NaN detected in D_Loss at batch {batch_idx}. Skipping.")
+                continue
+
             scaler_D.scale(d_loss).backward()
             scaler_D.unscale_(opt_D)
-            torch.nn.utils.clip_grad_norm_(discriminator.parameters(), max_norm=1.0)
+            torch.nn.utils.clip_grad_norm_(discriminator.parameters(), max_norm=0.5)
             scaler_D.step(opt_D)
             scaler_D.update()
             
@@ -79,10 +85,15 @@ def train_stage3(model, dataloader, epochs=50, device='cuda', ema=None):
                 
                 # Total loss: R + lambda*D + 0.1 * L_G
                 total_g_loss = rd_loss_dict['loss'] + 0.1 * g_adv_loss
+
+            # NaN Check
+            if torch.isnan(total_g_loss):
+                print(f"Warning: NaN detected in G_Loss at batch {batch_idx}. Skipping.")
+                continue
                 
             scaler_G.scale(total_g_loss).backward()
             scaler_G.unscale_(opt_G)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.5)
             scaler_G.step(opt_G)
             scaler_G.update()
             
