@@ -1,3 +1,7 @@
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
 import torch
 import time
 from torchvision.transforms.functional import to_pil_image
@@ -130,6 +134,14 @@ def test_pipeline():
         t_decode = time.perf_counter() - t1
 
     vram_after, _, _ = get_gpu_stats(device)
+
+    # Save images for visual verification
+    from torchvision.utils import save_image
+    print("\n💾 Saving results to disk...")
+    save_image(test_image_tensor, 'original_test.png', normalize=True, value_range=(-1, 1))
+    save_image(synthesized_image_tensor.clamp(-1, 1), 'reconstructed_result.png', normalize=True, value_range=(-1, 1))
+    print("  Saved: original_test.png")
+    print("  Saved: reconstructed_result.png")
 
     print(f"\nOriginal Shape     : {test_image_tensor.shape}")
     print(f"Synthesized Shape  : {synthesized_image_tensor.clamp(0,1).shape}")
