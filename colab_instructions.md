@@ -33,30 +33,41 @@ Because we need the Receiver to learn how to hallucinate from 16KB of math, we m
 *Note: We have added a built-in dataloader so you no longer need to write your own!*
 
 ### Step 1: Train the Core Mathematics (Stage 1)
-This teaches the Sender how to compress into 4-16KB payloads. The dataset will **automatically download** the first time you run this!
+The dataset **auto-downloads** on first run. You can control epochs, batch size, and data path.
 ```bash
-# Train Stage 1 (Outputs stage1_foundation.pth)
+# Default run (100 epochs, batch=8, auto-downloads DIV2K)
 !python src/train/stage1.py
+
+# Custom run (e.g. quick test: 10 epochs, batch of 4)
+!python src/train/stage1.py --epochs 10 --batch_size 4 --data_dir auto
 ```
+💾 **Checkpoint saved to:** `stage1_foundation.pth`
 
 ### Step 2: Refine Structural Perception (Stage 2)
-Next, we freeze the entropy model and focus on MS-SSIM quality. It will automatically load the weights from Stage 1.
+Automatically loads `stage1_foundation.pth`. Freezes the entropy model and trains with MS-SSIM.
 ```bash
-# Train Stage 2 (Outputs stage2_refined.pth)
+# Default run (100 epochs)
 !python src/train/stage2.py
+
+# Custom run
+!python src/train/stage2.py --epochs 50 --batch_size 4
 ```
+💾 **Checkpoint saved to:** `stage2_refined.pth`
 
 ### Step 3: Train the Receiver GAN (Stage 3)
-This is where the magic happens. The GAN learns to take the compressed math and synthesize HD images. It will automatically load the weights from Stage 2.
+Automatically loads `stage2_refined.pth`. The GAN synthesizes photorealistic images from the math payload.
 ```bash
-# Train Stage 3 (Outputs stage3_elite_final.pth)
+# Default run (50 epochs)
 !python src/train/stage3.py
+
+# Custom run
+!python src/train/stage3.py --epochs 20 --batch_size 4
 ```
+💾 **Checkpoint saved to:** `stage3_elite_final.pth`
 
 ### Step 4: Test the Telegram-Style Pipeline (Inference)
-Now that training is done and the checkpoint is saved (`stage3_elite_final.pth`), let's test the complete pipeline. We will grab an image, run it through the Sender, calculate the math payload size, and run it through the Receiver.
+Loads `stage3_elite_final.pth` and runs the full Sender → Receiver pipeline on a test image.
 ```bash
-# Tests Sender -> Transmission -> Receiver Pipeline
 !python src/inference.py
 ```
 

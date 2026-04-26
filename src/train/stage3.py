@@ -92,12 +92,21 @@ def train_stage3(model, dataloader, epochs=50, device='cuda', ema=None):
     return model, ema
 
 if __name__ == "__main__":
+    import argparse
     from src.model.aether_codec import AetherCodec
     from src.train.dataset import get_dataloader
     import torch
     import os
     
-    print("Initializing AetherCodec Stage 3 Training (GAN)...")
+    parser = argparse.ArgumentParser(description="Train AetherCodec Stage 3")
+    parser.add_argument("--epochs", type=int, default=50, help="Number of training epochs")
+    parser.add_argument("--batch_size", type=int, default=8, help="Batch size")
+    parser.add_argument("--data_dir", type=str, default="auto", help="Path to dataset")
+    args = parser.parse_args()
+    
+    print(f"Initializing AetherCodec Stage 3 Training (GAN)...")
+    print(f"Epochs: {args.epochs}, Batch Size: {args.batch_size}, Data: {args.data_dir}")
+    
     model = AetherCodec()
     if os.path.exists('stage2_refined.pth'):
         model.load_state_dict(torch.load('stage2_refined.pth', weights_only=True))
@@ -105,8 +114,8 @@ if __name__ == "__main__":
     else:
         print("Warning: stage2_refined.pth not found, starting from scratch.")
         
-    loader = get_dataloader('auto', batch_size=8)
-    model, ema = train_stage3(model, loader, epochs=50)
+    loader = get_dataloader(args.data_dir, batch_size=args.batch_size)
+    model, ema = train_stage3(model, loader, epochs=args.epochs)
     
     torch.save(model.state_dict(), 'stage3_elite_final.pth')
     print("Stage 3 complete and saved to 'stage3_elite_final.pth'")

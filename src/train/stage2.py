@@ -67,12 +67,21 @@ def train_stage2(model, dataloader, epochs=100, device='cuda', ema=None):
     return model, ema
 
 if __name__ == "__main__":
+    import argparse
     from src.model.aether_codec import AetherCodec
     from src.train.dataset import get_dataloader
     import torch
     import os
     
-    print("Initializing AetherCodec Stage 2 Training...")
+    parser = argparse.ArgumentParser(description="Train AetherCodec Stage 2")
+    parser.add_argument("--epochs", type=int, default=100, help="Number of training epochs")
+    parser.add_argument("--batch_size", type=int, default=8, help="Batch size")
+    parser.add_argument("--data_dir", type=str, default="auto", help="Path to dataset")
+    args = parser.parse_args()
+    
+    print(f"Initializing AetherCodec Stage 2 Training...")
+    print(f"Epochs: {args.epochs}, Batch Size: {args.batch_size}, Data: {args.data_dir}")
+    
     model = AetherCodec()
     if os.path.exists('stage1_foundation.pth'):
         model.load_state_dict(torch.load('stage1_foundation.pth', weights_only=True))
@@ -80,8 +89,8 @@ if __name__ == "__main__":
     else:
         print("Warning: stage1_foundation.pth not found, starting from scratch.")
         
-    loader = get_dataloader('auto', batch_size=8)
-    model, ema = train_stage2(model, loader, epochs=100)
+    loader = get_dataloader(args.data_dir, batch_size=args.batch_size)
+    model, ema = train_stage2(model, loader, epochs=args.epochs)
     
     torch.save(model.state_dict(), 'stage2_refined.pth')
     print("Stage 2 complete and saved to 'stage2_refined.pth'")

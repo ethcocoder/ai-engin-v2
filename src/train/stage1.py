@@ -60,14 +60,23 @@ def train_stage1(model, dataloader, epochs=100, device='cuda'):
     return model, ema
 
 if __name__ == "__main__":
+    import argparse
     from src.model.aether_codec import AetherCodec
     from src.train.dataset import get_dataloader
     import torch
     
-    print("Initializing AetherCodec Stage 1 Training...")
+    parser = argparse.ArgumentParser(description="Train AetherCodec Stage 1")
+    parser.add_argument("--epochs", type=int, default=100, help="Number of training epochs")
+    parser.add_argument("--batch_size", type=int, default=8, help="Batch size")
+    parser.add_argument("--data_dir", type=str, default="auto", help="Path to dataset (or 'auto' to download)")
+    args = parser.parse_args()
+    
+    print(f"Initializing AetherCodec Stage 1 Training...")
+    print(f"Epochs: {args.epochs}, Batch Size: {args.batch_size}, Data: {args.data_dir}")
+    
     model = AetherCodec()
-    loader = get_dataloader('auto', batch_size=8)
-    model, ema = train_stage1(model, loader, epochs=100)
+    loader = get_dataloader(args.data_dir, batch_size=args.batch_size)
+    model, ema = train_stage1(model, loader, epochs=args.epochs)
     
     torch.save(model.state_dict(), 'stage1_foundation.pth')
     print("Stage 1 complete and saved to 'stage1_foundation.pth'")
