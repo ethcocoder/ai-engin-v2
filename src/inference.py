@@ -116,11 +116,26 @@ def test_pipeline(checkpoint_path='stage3_elite_final.pth'):
 
     vram_before, _, _ = get_gpu_stats(device)
 
+    # Padding logic: Ensure dimensions are multiples of 16
+    H, W = test_image_tensor.shape[-2], test_image_tensor.shape[-1]
+    pad_h = (16 - H % 16) % 16
+    pad_w = (16 - W % 16) % 16
+    
+    if pad_h > 0 or pad_w > 0:
+        import torch.nn.functional as F
+        test_image_tensor = F.pad(test_image_tensor, (0, pad_w, 0, pad_h), mode='reflect')
+        print(f"  Padded input to {test_image_tensor.shape[-2]}x{test_image_tensor.shape[-1]}")
+
     with torch.no_grad():
         t0 = time.perf_counter()
         x_hat, likelihoods, y = model(test_image_tensor, force_hard=True)
         if device == 'cuda': torch.cuda.synchronize()
         t_total_inference = time.perf_counter() - t0
+        
+        # Crop back to original size
+        if pad_h > 0 or pad_w > 0:
+            x_hat = x_hat[:, :, :H, :W]
+            test_image_tensor = test_image_tensor[:, :, :H, :W]
         
         t_encode = t_total_inference * 0.4
         t_decode = t_total_inference * 0.6
