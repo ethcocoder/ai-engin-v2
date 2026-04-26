@@ -36,3 +36,10 @@ class EMA:
                 assert name in self.backup
                 param.data = self.backup[name]
         self.backup = {}
+
+    def state_dict(self):
+        return {'decay': self.decay, 'shadow': self.shadow}
+
+    def load_state_dict(self, state_dict):
+        self.decay = state_dict['decay']
+        self.shadow = state_dict['shadow']
