@@ -61,7 +61,18 @@ def train_stage3(model, dataloader, epochs=50, device='cuda', ema=None):
                 real_preds = discriminator(x)
                 fake_preds = discriminator(x_hat.detach())
                 
-                d_loss = adv_criterion.discriminator_loss(real_preds, fake_preds)
+                # Label Smoothing: Use 0.9 instead of 1.0 for real images
+                # This prevents the discriminator from becoming too strong (D=0.0000)
+                d_loss = 0.0
+                if isinstance(real_preds, list):
+                    for rp, fp in zip(real_preds, fake_preds):
+                        real_loss = adv_criterion.criterion(rp, torch.ones_like(rp) * 0.9)
+                        fake_loss = adv_criterion.criterion(fp, torch.zeros_like(fp))
+                        d_loss += (real_loss + fake_loss) * 0.5
+                else:
+                    real_loss = adv_criterion.criterion(real_preds, torch.ones_like(real_preds) * 0.9)
+                    fake_loss = adv_criterion.criterion(fake_preds, torch.zeros_like(fake_preds))
+                    d_loss = (real_loss + fake_loss) * 0.5
             
             # NaN Check
             if torch.isnan(d_loss):
