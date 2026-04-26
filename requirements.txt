@@ -1,9 +1,11 @@
-# Paradox Genesis Core v2.0 Dependency Stack
+# AetherCodec-Elite v4 Dependencies
 torch>=2.1.0
 torchvision>=0.16.0
 numpy
-pillow
+Pillow
 matplotlib
 tqdm
 requests
 scipy
+torchmetrics
+torchac

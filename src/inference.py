@@ -5,24 +5,26 @@ from src.train.dataset import ImageFolderDataset
 from torchvision import transforms
 
 def test_pipeline():
-    print("Initializing AetherCodec-Elite...")
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    print(f"Initializing AetherCodec-Elite on [{device.upper()}]...")
     model = AetherCodec()
     try:
-        model.load_state_dict(torch.load('stage3_elite_final.pth', weights_only=True))
+        model.load_state_dict(torch.load('stage3_elite_final.pth', weights_only=True, map_location=device))
         print("Successfully loaded 'stage3_elite_final.pth'")
     except FileNotFoundError:
         print("Warning: stage3_elite_final.pth not found. Using untrained weights for demonstration.")
-    
+
+    model = model.to(device)
     model.eval()
 
     # Get a test image
     print("Loading test image from DIV2K...")
     try:
         dataset = ImageFolderDataset('dataset/DIV2K_train_HR', transform=transforms.ToTensor())
-        test_image_tensor = dataset[0][0].unsqueeze(0)
+        test_image_tensor = dataset[0][0].unsqueeze(0).to(device)
     except Exception as e:
         print("Could not load DIV2K image. Creating a dummy 256x256 image for test.")
-        test_image_tensor = torch.rand(1, 3, 256, 256)
+        test_image_tensor = torch.rand(1, 3, 256, 256).to(device)
 
     with torch.no_grad():
         print("\n--- SENDER DEVICE ---")

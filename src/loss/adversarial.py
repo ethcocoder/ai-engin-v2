@@ -32,10 +32,9 @@ class AdversarialLoss(nn.Module):
         loss = 0.0
         if not isinstance(fake_preds, list):
             fake_preds = [fake_preds]
-            
-        for fake_pred in zip(fake_preds):
-            # fake_pred is a tuple from zip, extract the element
-            pred = fake_pred[0]
+
+        # Iterate directly — no zip() wrapper to avoid tuple unpacking bugs
+        for pred in fake_preds:
             loss += self.criterion(pred, torch.ones_like(pred))
-            
+
         return loss

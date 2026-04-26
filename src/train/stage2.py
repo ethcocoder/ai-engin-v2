@@ -1,11 +1,15 @@
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+
 import torch
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
 from torch.cuda.amp import GradScaler, autocast
 import torch.nn as nn
 
-from ..loss.rate_distortion import RateDistortionLoss
-from ..utils.ema import EMA
+from src.loss.rate_distortion import RateDistortionLoss
+from src.utils.ema import EMA
 
 def train_stage2(model, dataloader, epochs=100, device='cuda', ema=None):
     """

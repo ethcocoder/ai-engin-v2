@@ -64,16 +64,10 @@ class SynthesisTransform(nn.Module):
 
     def forward(self, y_hat, orig_input=None):
         """
-        y_hat: (B, latent_dim, H/16, W/16)
-        orig_input: (B, 3, H, W) - Used if available for RRN. During inference, this might be bypassed or handled differently.
-        Wait, standard codecs don't have access to original input at decoder side for RRN.
-        The prompt says: "Add a Residual Refinement Network (RRN) at full resolution: 3 conv layers that take [reconstructed, input] and output a residual correction map."
-        If the decoder doesn't have the original input during deployment, taking [reconstructed, input] is impossible.
-        Let's interpret this as it was stated, but note that it might be a perceptual enhancement module that uses something else? No, 'input' might mean the reconstructed input before RRN, or it literally means the original input (which makes it an enhancement only feasible if input is transmitted? No, that breaks compression).
-        I will assume it takes [reconstructed, reconstructed_feature] or just provide the reconstructed twice if orig_input is None.
-        Wait, I'll allow orig_input, but if None, I'll pass recon itself or zeros.
-        Actually, maybe it meant [reconstructed, intermediate_feature]?
-        I will implement [reconstructed, recon] if orig_input is None, or just implement it verbatim as requested and pass original image during training.
+        y_hat: (B, latent_dim, H/16, W/16) — quantized latent from encoder.
+        orig_input: (B, 3, H, W) — original image, passed during training for RRN.
+                    During inference, RRN uses the reconstructed image as its own reference.
+        Returns: (B, 3, H, W) reconstructed image in range [-1, 1].
         """
         x = self.swin_blocks(y_hat)
         x = self.stage1(x)
