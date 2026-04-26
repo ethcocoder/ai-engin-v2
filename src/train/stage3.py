@@ -109,6 +109,24 @@ def train_stage3(model, dataloader, epochs=50, device='cuda', ema=None):
         scheduler_G.step()
         scheduler_D.step()
         print(f"Epoch {epoch+1} Completed.")
+
+        # --- Checkpoint Saving ---
+        checkpoint = {
+            'epoch': epoch + 1,
+            'state_dict': model.state_dict(),
+            'ema_state_dict': ema.state_dict() if ema else None,
+            'discriminator_state_dict': discriminator.state_dict(),
+            'opt_G_state_dict': opt_G.state_dict(),
+            'opt_D_state_dict': opt_D.state_dict(),
+        }
+        
+        # Save "Latest" (Overwrites every epoch)
+        torch.save(checkpoint, 'stage3_latest.pth')
+        
+        # Save "Milestone" every 10 epochs
+        if (epoch + 1) % 10 == 0:
+            torch.save(checkpoint, f'stage3_epoch_{epoch+1}.pth')
+            print(f"Milestone checkpoint saved: stage3_epoch_{epoch+1}.pth")
         
     return model, ema
 

@@ -66,6 +66,22 @@ def train_stage1(model, dataloader, epochs=100, device='cuda'):
         scheduler.step()
         print(f"Epoch {epoch+1} Completed. Avg Loss: {epoch_loss/len(dataloader):.4f}")
         
+        # --- Checkpoint Saving ---
+        checkpoint = {
+            'epoch': epoch + 1,
+            'state_dict': model.state_dict(),
+            'ema_state_dict': ema.state_dict() if ema else None,
+            'optimizer_state_dict': optimizer.state_dict(),
+        }
+        
+        # Save "Latest" (Overwrites every epoch)
+        torch.save(checkpoint, 'stage1_latest.pth')
+        
+        # Save "Milestone" every 10 epochs
+        if (epoch + 1) % 10 == 0:
+            torch.save(checkpoint, f'stage1_epoch_{epoch+1}.pth')
+            print(f"Milestone checkpoint saved: stage1_epoch_{epoch+1}.pth")
+        
     return model, ema
 
 if __name__ == "__main__":
