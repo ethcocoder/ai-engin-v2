@@ -96,12 +96,21 @@ def test_pipeline():
 
     # Load test image
     print("Loading test image...")
+    # Use the same normalization as training [-1, 1]
+    inference_transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+    ])
+    
     try:
-        dataset = ImageFolderDataset('dataset/DIV2K_train_HR', transform=transforms.ToTensor())
-        test_image_tensor = dataset[0][0].unsqueeze(0).to(device)
+        # Load a real image from the dataset folder
+        img_path = os.path.join('dataset/DIV2K_train_HR', os.listdir('dataset/DIV2K_train_HR')[0])
+        from PIL import Image
+        img = Image.open(img_path).convert('RGB')
+        test_image_tensor = inference_transform(img).unsqueeze(0).to(device)
     except Exception:
         print("DIV2K not found. Creating dummy 256x256 image.")
-        test_image_tensor = torch.rand(1, 3, 256, 256).to(device)
+        test_image_tensor = torch.randn(1, 3, 256, 256).to(device)
 
     # Warm up GPU
     if device == 'cuda':

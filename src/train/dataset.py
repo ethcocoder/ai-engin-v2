@@ -63,11 +63,13 @@ def get_dataloader(data_dir=None, batch_size=8, image_size=256, is_train=True):
             transforms.RandomHorizontalFlip(),
             transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.05),
             transforms.ToTensor(),
+            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
         ])
     else:
         transform = transforms.Compose([
             transforms.CenterCrop(image_size),
             transforms.ToTensor(),
+            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
         ])
         
     dataset = ImageFolderDataset(data_dir, transform=transform)
