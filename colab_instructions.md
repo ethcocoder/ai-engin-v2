@@ -32,29 +32,58 @@ Your idea of compressing an image into "mathematics components" is exactly what 
 Because we need the Receiver to learn how to hallucinate from 16KB of math, we must train the system. 
 *Note: We have added a built-in dataloader so you no longer need to write your own!*
 
-### Step 1: Download a Training Dataset
-We will use an image dataset (like DIV2K or COCO) to teach the Engine.
-```bash
-# Download a sample dataset of images to train on
-!mkdir dataset
-!wget http://data.vision.ee.ethz.ch/cvl/DIV2K/DIV2K_train_HR.zip
-!unzip -q DIV2K_train_HR.zip -d dataset/
+### Step 1: Train the Core Mathematics (Stage 1)
+This teaches the Sender how to compress into 4-16KB payloads. The dataset will **automatically download** the first time you run this! Run this in a Python cell:
+```python
+import torch
+from src.model.aether_codec import AetherCodec
+from src.train.dataset import get_dataloader
+from src.train.stage1 import train_stage1
+
+# Initialize Model and Auto-Download Dataset
+model = AetherCodec()
+loader = get_dataloader('auto', batch_size=8)
+
+# Train Stage 1
+model, ema = train_stage1(model, loader, epochs=100)
+
+# Save the Foundation Weights
+torch.save(model.state_dict(), 'stage1_foundation.pth')
+print("Stage 1 Complete!")
 ```
 
-### Step 2: Train the Core Mathematics (Stage 1 & 2)
-This teaches the Sender how to compress into 4-16KB payloads.
+### Step 2: Refine Structural Perception (Stage 2)
+Next, we freeze the entropy model and focus on MS-SSIM quality.
 ```python
-# Stage 1: Build the Latent Math
-!python -c "from src.train.stage1 import train_stage1; from src.model.aether_codec import AetherCodec; from src.train.dataset import get_dataloader; model = AetherCodec(); loader = get_dataloader('dataset/DIV2K_train_HR', batch_size=8); train_stage1(model, loader, epochs=100)"
+import torch
+from src.model.aether_codec import AetherCodec
+from src.train.dataset import get_dataloader
+from src.train.stage2 import train_stage2
 
-# Stage 2: Refine Structural Perception
-!python -c "from src.train.stage2 import train_stage2; from src.model.aether_codec import AetherCodec; from src.train.dataset import get_dataloader; model = AetherCodec(); loader = get_dataloader('dataset/DIV2K_train_HR', batch_size=8); train_stage2(model, loader, epochs=100)"
+model = AetherCodec()
+model.load_state_dict(torch.load('stage1_foundation.pth'))
+loader = get_dataloader('auto', batch_size=8)
+
+model, ema = train_stage2(model, loader, epochs=100)
+torch.save(model.state_dict(), 'stage2_refined.pth')
 ```
 
 ### Step 3: Train the Receiver GAN (Stage 3)
 This is where the magic happens. The GAN learns to take the compressed math and synthesize HD images.
 ```python
-!python -c "from src.train.stage3 import train_stage3; from src.model.aether_codec import AetherCodec; from src.train.dataset import get_dataloader; model = AetherCodec(); loader = get_dataloader('dataset/DIV2K_train_HR', batch_size=8); train_stage3(model, loader, epochs=50)"
+import torch
+from src.model.aether_codec import AetherCodec
+from src.train.dataset import get_dataloader
+from src.train.stage3 import train_stage3
+
+model = AetherCodec()
+model.load_state_dict(torch.load('stage2_refined.pth'))
+loader = get_dataloader('auto', batch_size=8)
+
+# The GAN synthesizes the final image
+model, ema = train_stage3(model, loader, epochs=50)
+torch.save(model.state_dict(), 'stage3_elite_final.pth')
+print("AetherCodec-Elite Training Complete!")
 ```
 
 ---

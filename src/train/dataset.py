@@ -44,4 +44,33 @@ class ImageFolderDataset(Dataset):
         return len(self.image_files)
 
     def __getitem__(self, idx):
-       
+        img_path = self.image_files[idx]
+        image = Image.open(img_path).convert('RGB')
+        
+        if self.transform:
+            image = self.transform(image)
+            
+        return image, 0
+
+def get_dataloader(data_dir=None, batch_size=8, image_size=256, is_train=True):
+    # Automatically download the dataset if data_dir is not provided or set to 'auto'
+    if data_dir is None or data_dir == 'auto':
+        data_dir = download_and_extract_div2k()
+        
+    if is_train:
+        transform = transforms.Compose([
+            transforms.RandomCrop(image_size),
+            transforms.RandomHorizontalFlip(),
+            transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.05),
+            transforms.ToTensor(),
+        ])
+    else:
+        transform = transforms.Compose([
+            transforms.CenterCrop(image_size),
+            transforms.ToTensor(),
+        ])
+        
+    dataset = ImageFolderDataset(data_dir, transform=transform)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=is_train, num_workers=2, drop_last=True)
+    
+    return dataloader
