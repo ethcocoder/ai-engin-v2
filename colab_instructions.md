@@ -33,35 +33,26 @@ Because we need the Receiver to learn how to hallucinate from 16KB of math, we m
 *Note: We have added a built-in dataloader so you no longer need to write your own!*
 
 ### Step 1: Train the Core Mathematics (Stage 1)
-The dataset **auto-downloads** on first run. You can control epochs, batch size, and data path.
+The dataset **auto-downloads** on first run. Now optimized for **40 epochs**.
 ```bash
-# Default run (100 epochs, batch=8, auto-downloads DIV2K)
+# Optimized run (40 epochs default)
 !python src/train/stage1.py
-
-# Custom run (e.g. quick test: 10 epochs, batch of 4)
-!python src/train/stage1.py --epochs 10 --batch_size 4 --data_dir auto
 ```
 💾 **Checkpoint saved to:** `stage1_foundation.pth`
 
 ### Step 2: Refine Structural Perception (Stage 2)
-Automatically loads `stage1_foundation.pth`. Freezes the entropy model and trains with MS-SSIM.
+Automatically loads `stage1_foundation.pth`. Optimized for **30 epochs**.
 ```bash
-# Default run (100 epochs)
+# Optimized run (30 epochs default)
 !python src/train/stage2.py
-
-# Custom run
-!python src/train/stage2.py --epochs 50 --batch_size 4
 ```
 💾 **Checkpoint saved to:** `stage2_refined.pth`
 
 ### Step 3: Train the Receiver GAN (Stage 3)
-Automatically loads `stage2_refined.pth`. The GAN synthesizes photorealistic images from the math payload.
+The final photorealistic stage. Optimized for **25 epochs**.
 ```bash
-# Default run (50 epochs)
+# Optimized run (25 epochs default)
 !python src/train/stage3.py
-
-# Custom run
-!python src/train/stage3.py --epochs 20 --batch_size 4
 ```
 💾 **Checkpoint saved to:** `stage3_elite_final.pth`
 

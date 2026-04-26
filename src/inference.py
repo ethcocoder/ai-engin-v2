@@ -116,15 +116,16 @@ def test_pipeline(checkpoint_path='stage3_elite_final.pth'):
 
     vram_before, _, _ = get_gpu_stats(device)
 
-    # Padding logic: Ensure dimensions are multiples of 16
+    # Padding logic: Ensure dimensions are multiples of 64
+    # This prevents rounding errors in the deep hyperprior layers (99 vs 100)
     H, W = test_image_tensor.shape[-2], test_image_tensor.shape[-1]
-    pad_h = (16 - H % 16) % 16
-    pad_w = (16 - W % 16) % 16
+    pad_h = (64 - H % 64) % 64
+    pad_w = (64 - W % 64) % 64
     
     if pad_h > 0 or pad_w > 0:
         import torch.nn.functional as F
         test_image_tensor = F.pad(test_image_tensor, (0, pad_w, 0, pad_h), mode='reflect')
-        print(f"  Padded input to {test_image_tensor.shape[-2]}x{test_image_tensor.shape[-1]}")
+        print(f"  Padded input from {H}x{W} to {test_image_tensor.shape[-2]}x{test_image_tensor.shape[-1]}")
 
     with torch.no_grad():
         t0 = time.perf_counter()
@@ -171,11 +172,71 @@ def test_pipeline(checkpoint_path='stage3_elite_final.pth'):
         payload_kb    = payload_kb
     )
 
+def test_from_internet(model, device):
+    """
+    Downloads 4 random high-quality images and runs them through the pipeline.
+    """
+    import math
+    import urllib.request
+    from PIL import Image
+    
+    # Updated URLs to be more reliable
+    urls = [
+        "https://images.unsplash.com/photo-1541963463532-d68292c34b19?q=80&w=1000", # Architecture
+        "https://images.unsplash.com/photo-1501785888041-af3ef285b470?q=80&w=1000", # Nature
+        "https://images.unsplash.com/photo-1533450718592-29d45635f0a9?q=80&w=1000", # Wildlife
+        "https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?q=80&w=1000"  # Mountains
+    ]
+    
+    transform = transforms.Compose([
+        transforms.Resize(512),
+        transforms.CenterCrop(512),
+        transforms.ToTensor(),
+        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+    ])
+    
+    print("\n🌍 STARTING INTERNET STRESS TEST...")
+    for i, url in enumerate(urls):
+        print(f"\n[{i+1}/4] Downloading: {url}")
+        try:
+            filename = f"internet_test_{i+1}.jpg"
+            urllib.request.urlretrieve(url, filename)
+            img = Image.open(filename).convert('RGB')
+            x = transform(img).unsqueeze(0).to(device)
+            
+            with torch.no_grad():
+                x_hat, likelihoods, _ = model(x, force_hard=True)
+                
+            # Math
+            total_bits = 0.0
+            for likelihood in likelihoods.values():
+                total_bits += torch.log(likelihood + 1e-9).sum() / -math.log(2)
+            payload_kb = total_bits.item() / 8 / 1024
+            
+            from torchvision.utils import save_image
+            save_image(x, f"internet_{i+1}_original.png", normalize=True, value_range=(-1, 1))
+            save_image(x_hat.clamp(-1, 1), f"internet_{i+1}_reconstructed.png", normalize=True, value_range=(-1, 1))
+            print(f"✅ Success! Payload: {payload_kb:.2f} KB. Saved to internet_{i+1}_reconstructed.png")
+            
+        except Exception as e:
+            print(f"❌ Failed to process {url}: {e}")
+
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--checkpoint', type=str, default='stage3_elite_final.pth', help='Path to checkpoint pth file')
+    parser.add_argument('--checkpoint', type=str, default='stage1_foundation.pth', help='Path to checkpoint pth file')
+    parser.add_argument('--mode', type=str, default='single', choices=['single', 'internet'], help='Test mode')
     args = parser.parse_args()
     
-    test_pipeline(args.checkpoint)
+    if args.mode == 'internet':
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        model = AetherCodec()
+        try:
+            model.load_state_dict(torch.load(args.checkpoint, weights_only=True, map_location=device))
+            model = model.to(device).eval()
+            test_from_internet(model, device)
+        except Exception as e:
+            print(f"Error loading model: {e}")
+    else:
+        test_pipeline(args.checkpoint)
 

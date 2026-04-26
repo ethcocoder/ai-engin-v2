@@ -91,7 +91,7 @@ if __name__ == "__main__":
     import torch
     
     parser = argparse.ArgumentParser(description="Train AetherCodec Stage 1")
-    parser.add_argument("--epochs", type=int, default=100, help="Number of training epochs")
+    parser.add_argument("--epochs", type=int, default=40, help="Number of training epochs")
     parser.add_argument("--batch_size", type=int, default=8, help="Batch size")
     parser.add_argument("--data_dir", type=str, default="auto", help="Path to dataset (or 'auto' to download)")
     args = parser.parse_args()

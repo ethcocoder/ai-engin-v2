@@ -149,7 +149,7 @@ if __name__ == "__main__":
     import os
     
     parser = argparse.ArgumentParser(description="Train AetherCodec Stage 3")
-    parser.add_argument("--epochs", type=int, default=50, help="Number of training epochs")
+    parser.add_argument("--epochs", type=int, default=25, help="Number of training epochs")
     parser.add_argument("--batch_size", type=int, default=8, help="Batch size")
     parser.add_argument("--data_dir", type=str, default="auto", help="Path to dataset")
     args = parser.parse_args()
