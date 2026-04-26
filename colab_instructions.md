@@ -65,11 +65,20 @@ Automatically loads `stage2_refined.pth`. The GAN synthesizes photorealistic ima
 ```
 💾 **Checkpoint saved to:** `stage3_elite_final.pth`
 
-### Step 4: Test the Telegram-Style Pipeline (Inference)
-Loads `stage3_elite_final.pth` and runs the full Sender → Receiver pipeline on a test image.
+### Step 4: Progression Study (The "Aether Evolution")
+You can now test the model after each stage to see the quality grow. Each command will save a specific result image (e.g., `result_stage1_foundation.png`).
+
 ```bash
-!python src/inference.py
+# Test Stage 1 Foundation
+!python src/inference.py --checkpoint stage1_foundation.pth
+
+# Test Stage 2 Refinement
+!python src/inference.py --checkpoint stage2_refined.pth
+
+# Test Stage 3 Final (The "Elite" GAN version)
+!python src/inference.py --checkpoint stage3_elite_final.pth
 ```
+
 
 ---
 

@@ -81,36 +81,34 @@ def print_hardware_report(device, image_shape,
 # ─────────────────────────────────────────────
 # Main Inference Pipeline
 # ─────────────────────────────────────────────
-def test_pipeline():
+def test_pipeline(checkpoint_path='stage3_elite_final.pth'):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Initializing AetherCodec-Elite on [{device.upper()}]...")
     model = AetherCodec()
     try:
-        model.load_state_dict(torch.load('stage3_elite_final.pth', weights_only=True, map_location=device))
-        print("Successfully loaded 'stage3_elite_final.pth'")
+        model.load_state_dict(torch.load(checkpoint_path, weights_only=True, map_location=device))
+        print(f"Successfully loaded '{checkpoint_path}'")
     except FileNotFoundError:
-        print("Warning: stage3_elite_final.pth not found. Using untrained weights for demonstration.")
+        print(f"Warning: {checkpoint_path} not found. Using untrained weights.")
 
     model = model.to(device)
     model.eval()
 
     # Load test image
     print("Loading test image...")
-    # Use the same normalization as training [-1, 1]
     inference_transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
     ])
     
     try:
-        # Load a real image from the dataset folder
         img_path = os.path.join('dataset/DIV2K_train_HR', os.listdir('dataset/DIV2K_train_HR')[0])
         from PIL import Image
         img = Image.open(img_path).convert('RGB')
         test_image_tensor = inference_transform(img).unsqueeze(0).to(device)
     except Exception:
-        print("DIV2K not found. Creating dummy 256x256 image.")
-        test_image_tensor = torch.randn(1, 3, 256, 256).to(device)
+        print("DIV2K not found. Creating dummy 512x512 image.")
+        test_image_tensor = torch.randn(1, 3, 512, 512).to(device)
 
     # Warm up GPU
     if device == 'cuda':
@@ -119,48 +117,35 @@ def test_pipeline():
     vram_before, _, _ = get_gpu_stats(device)
 
     with torch.no_grad():
-        # ── SENDER → TRANSMISSION → RECEIVER ──────────
         t0 = time.perf_counter()
-        
-        # We use model() directly to get the likelihoods (Entropy) for exact math
         x_hat, likelihoods, y = model(test_image_tensor, force_hard=True)
-        
         if device == 'cuda': torch.cuda.synchronize()
         t_total_inference = time.perf_counter() - t0
         
-        # Split timing for report (approximate split)
         t_encode = t_total_inference * 0.4
         t_decode = t_total_inference * 0.6
 
-        # --- Exact Math Payload Calculation ---
         import math
         total_bits = 0.0
         for likelihood in likelihoods.values():
-            # likelihoods are probabilities, -log2(p) is bits
             total_bits += torch.log(likelihood + 1e-9).sum() / -math.log(2)
         
         payload_kb = total_bits.item() / 8 / 1024
         bpp = total_bits.item() / (test_image_tensor.shape[-2] * test_image_tensor.shape[-1])
-        
         synthesized_image_tensor = x_hat
 
     vram_after, _, _ = get_gpu_stats(device)
 
-    # Save images for visual verification
     from torchvision.utils import save_image
-    print("\n💾 Saving results to disk...")
-    # save_image handles the [-1, 1] -> [0, 1] shift automatically with these flags
+    output_filename = f"result_{os.path.basename(checkpoint_path).replace('.pth', '')}.png"
+    print(f"\n💾 Saving result as: {output_filename}")
     save_image(test_image_tensor, 'original_test.png', normalize=True, value_range=(-1, 1))
-    save_image(synthesized_image_tensor.clamp(-1, 1), 'reconstructed_result.png', normalize=True, value_range=(-1, 1))
-    print(f"  Saved: original_test.png")
-    print(f"  Saved: reconstructed_result.png")
+    save_image(synthesized_image_tensor.clamp(-1, 1), output_filename, normalize=True, value_range=(-1, 1))
 
     print(f"\nOriginal Shape     : {test_image_tensor.shape}")
-    print(f"Synthesized Shape  : {synthesized_image_tensor.shape}")
     print(f"Real Compressed BPP: {bpp:.4f}")
     print(f"Math Payload (KB)  : {payload_kb:.2f} KB")
 
-    # Print full hardware report
     print_hardware_report(
         device        = device,
         image_shape   = test_image_tensor.shape,
@@ -172,5 +157,10 @@ def test_pipeline():
     )
 
 if __name__ == "__main__":
-    test_pipeline()
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--checkpoint', type=str, default='stage3_elite_final.pth', help='Path to checkpoint pth file')
+    args = parser.parse_args()
+    
+    test_pipeline(args.checkpoint)
 
