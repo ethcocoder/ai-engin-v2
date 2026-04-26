@@ -5,7 +5,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 import torch
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
-from torch.cuda.amp import GradScaler, autocast
+from torch.amp import GradScaler, autocast
+
+import torch.nn as nn
+from tqdm import tqdm
 
 from src.loss.rate_distortion import RateDistortionLoss
 from src.loss.adversarial import AdversarialLoss
@@ -35,8 +38,8 @@ def train_stage3(model, dataloader, epochs=50, device='cuda', ema=None):
     scheduler_G = CosineAnnealingWarmRestarts(opt_G, T_0=50, T_mult=2)
     scheduler_D = CosineAnnealingWarmRestarts(opt_D, T_0=50, T_mult=2)
     
-    scaler_G = GradScaler()
-    scaler_D = GradScaler()
+    scaler_G = GradScaler('cuda')
+    scaler_D = GradScaler('cuda')
     
     if ema is None:
         ema = EMA(model, decay=0.999)
@@ -44,12 +47,13 @@ def train_stage3(model, dataloader, epochs=50, device='cuda', ema=None):
     print("Starting Stage 3 Training...")
     
     for epoch in range(epochs):
-        for batch_idx, data in enumerate(dataloader):
+        pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}")
+        for batch_idx, data in enumerate(pbar):
             x = data[0].to(device) if isinstance(data, (list, tuple)) else data.to(device)
             
             # --- Train Discriminator ---
             opt_D.zero_grad()
-            with autocast():
+            with autocast('cuda'):
                 with torch.no_grad():
                     x_hat, _, _ = model(x, force_hard=False)
                 
@@ -66,7 +70,7 @@ def train_stage3(model, dataloader, epochs=50, device='cuda', ema=None):
             
             # --- Train Generator (Codec) ---
             opt_G.zero_grad()
-            with autocast():
+            with autocast('cuda'):
                 x_hat, likelihoods, y = model(x, force_hard=False)
                 fake_preds = discriminator(x_hat)
                 
@@ -84,10 +88,12 @@ def train_stage3(model, dataloader, epochs=50, device='cuda', ema=None):
             
             ema.update(model)
             
-            if batch_idx % 100 == 0:
-                print(f"Epoch [{epoch+1}/{epochs}] Batch {batch_idx} "
-                      f"G_Loss: {total_g_loss.item():.4f} D_Loss: {d_loss.item():.4f} "
-                      f"BPP: {rd_loss_dict['bpp_loss'].item():.4f}")
+            if batch_idx % 10 == 0:
+                pbar.set_postfix({
+                    "G": f"{total_g_loss.item():.4f}",
+                    "D": f"{d_loss.item():.4f}",
+                    "bpp": f"{rd_loss_dict['bpp_loss'].item():.4f}"
+                })
                 
         scheduler_G.step()
         scheduler_D.step()

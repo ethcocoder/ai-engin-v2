@@ -5,8 +5,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 import torch
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
-from torch.cuda.amp import GradScaler, autocast
+from torch.amp import GradScaler, autocast
 import torch.nn as nn
+from tqdm import tqdm
 
 from src.model.aether_codec import AetherCodec
 from src.loss.rate_distortion import RateDistortionLoss
@@ -23,20 +24,21 @@ def train_stage1(model, dataloader, epochs=100, device='cuda'):
     criterion = RateDistortionLoss(lmbda=0.01, use_ms_ssim=False, use_lpips=False).to(device)
     optimizer = AdamW(model.parameters(), lr=1e-4, betas=(0.9, 0.999), weight_decay=1e-4)
     scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=50, T_mult=2)
-    scaler = GradScaler()
+    scaler = GradScaler('cuda')
     ema = EMA(model, decay=0.999)
     
     print("Starting Stage 1 Training...")
     
     for epoch in range(epochs):
         epoch_loss = 0.0
-        for batch_idx, data in enumerate(dataloader):
+        pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}")
+        for batch_idx, data in enumerate(pbar):
             # Assuming data is a tuple where first element is image
             x = data[0].to(device) if isinstance(data, (list, tuple)) else data.to(device)
             
             optimizer.zero_grad()
             
-            with autocast():
+            with autocast('cuda'):
                 x_hat, likelihoods, y = model(x, force_hard=False)
                 loss_dict = criterion(x, x_hat, likelihoods)
                 loss = loss_dict['loss']
@@ -54,9 +56,12 @@ def train_stage1(model, dataloader, epochs=100, device='cuda'):
             
             epoch_loss += loss.item()
             
-            if batch_idx % 100 == 0:
-                print(f"Epoch [{epoch+1}/{epochs}] Batch {batch_idx} Loss: {loss.item():.4f} "
-                      f"BPP: {loss_dict['bpp_loss'].item():.4f} MSE: {loss_dict['d_loss'].item():.4f}")
+            if batch_idx % 10 == 0:
+                pbar.set_postfix({
+                    "loss": f"{loss.item():.4f}",
+                    "bpp": f"{loss_dict['bpp_loss'].item():.4f}",
+                    "mse": f"{loss_dict['d_loss'].item():.4f}"
+                })
                 
         scheduler.step()
         print(f"Epoch {epoch+1} Completed. Avg Loss: {epoch_loss/len(dataloader):.4f}")
