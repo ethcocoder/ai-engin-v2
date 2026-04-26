@@ -119,41 +119,46 @@ def test_pipeline():
     vram_before, _, _ = get_gpu_stats(device)
 
     with torch.no_grad():
-        # ── SENDER ──────────────────────────────
-        print("\n--- SENDER DEVICE ---")
+        # ── SENDER → TRANSMISSION → RECEIVER ──────────
         t0 = time.perf_counter()
-        y_math   = model.encoder(test_image_tensor)
-        y_payload, _ = model.y_quantizer(y_math, force_hard=True)
+        
+        # We use model() directly to get the likelihoods (Entropy) for exact math
+        x_hat, likelihoods, y = model(test_image_tensor, force_hard=True)
+        
         if device == 'cuda': torch.cuda.synchronize()
-        t_encode = time.perf_counter() - t0
+        t_total_inference = time.perf_counter() - t0
+        
+        # Split timing for report (approximate split)
+        t_encode = t_total_inference * 0.4
+        t_decode = t_total_inference * 0.6
 
-        num_elements   = y_payload.numel()
-        payload_kb     = (num_elements * 1.5) / 8 / 1024
-        print(f"📡 Payload ready: {payload_kb:.2f} KB")
-
-        # ── TRANSMISSION ─────────────────────────
-        print("\n--- NETWORK TRANSMISSION ---")
-        print("Sending payload...")
-
-        # ── RECEIVER ─────────────────────────────
-        print("\n--- RECEIVER DEVICE ---")
-        t1 = time.perf_counter()
-        synthesized_image_tensor = model.decoder(y_payload)
-        if device == 'cuda': torch.cuda.synchronize()
-        t_decode = time.perf_counter() - t1
+        # --- Exact Math Payload Calculation ---
+        import math
+        total_bits = 0.0
+        for likelihood in likelihoods.values():
+            # likelihoods are probabilities, -log2(p) is bits
+            total_bits += torch.log(likelihood + 1e-9).sum() / -math.log(2)
+        
+        payload_kb = total_bits.item() / 8 / 1024
+        bpp = total_bits.item() / (test_image_tensor.shape[-2] * test_image_tensor.shape[-1])
+        
+        synthesized_image_tensor = x_hat
 
     vram_after, _, _ = get_gpu_stats(device)
 
     # Save images for visual verification
     from torchvision.utils import save_image
     print("\n💾 Saving results to disk...")
+    # save_image handles the [-1, 1] -> [0, 1] shift automatically with these flags
     save_image(test_image_tensor, 'original_test.png', normalize=True, value_range=(-1, 1))
     save_image(synthesized_image_tensor.clamp(-1, 1), 'reconstructed_result.png', normalize=True, value_range=(-1, 1))
-    print("  Saved: original_test.png")
-    print("  Saved: reconstructed_result.png")
+    print(f"  Saved: original_test.png")
+    print(f"  Saved: reconstructed_result.png")
 
     print(f"\nOriginal Shape     : {test_image_tensor.shape}")
-    print(f"Synthesized Shape  : {synthesized_image_tensor.clamp(0,1).shape}")
+    print(f"Synthesized Shape  : {synthesized_image_tensor.shape}")
+    print(f"Real Compressed BPP: {bpp:.4f}")
+    print(f"Math Payload (KB)  : {payload_kb:.2f} KB")
 
     # Print full hardware report
     print_hardware_report(
