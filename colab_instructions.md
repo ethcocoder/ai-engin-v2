@@ -33,57 +33,31 @@ Because we need the Receiver to learn how to hallucinate from 16KB of math, we m
 *Note: We have added a built-in dataloader so you no longer need to write your own!*
 
 ### Step 1: Train the Core Mathematics (Stage 1)
-This teaches the Sender how to compress into 4-16KB payloads. The dataset will **automatically download** the first time you run this! Run this in a Python cell:
-```python
-import torch
-from src.model.aether_codec import AetherCodec
-from src.train.dataset import get_dataloader
-from src.train.stage1 import train_stage1
-
-# Initialize Model and Auto-Download Dataset
-model = AetherCodec()
-loader = get_dataloader('auto', batch_size=8)
-
-# Train Stage 1
-model, ema = train_stage1(model, loader, epochs=100)
-
-# Save the Foundation Weights
-torch.save(model.state_dict(), 'stage1_foundation.pth')
-print("Stage 1 Complete!")
+This teaches the Sender how to compress into 4-16KB payloads. The dataset will **automatically download** the first time you run this!
+```bash
+# Train Stage 1 (Outputs stage1_foundation.pth)
+!python src/train/stage1.py
 ```
 
 ### Step 2: Refine Structural Perception (Stage 2)
-Next, we freeze the entropy model and focus on MS-SSIM quality.
-```python
-import torch
-from src.model.aether_codec import AetherCodec
-from src.train.dataset import get_dataloader
-from src.train.stage2 import train_stage2
-
-model = AetherCodec()
-model.load_state_dict(torch.load('stage1_foundation.pth'))
-loader = get_dataloader('auto', batch_size=8)
-
-model, ema = train_stage2(model, loader, epochs=100)
-torch.save(model.state_dict(), 'stage2_refined.pth')
+Next, we freeze the entropy model and focus on MS-SSIM quality. It will automatically load the weights from Stage 1.
+```bash
+# Train Stage 2 (Outputs stage2_refined.pth)
+!python src/train/stage2.py
 ```
 
 ### Step 3: Train the Receiver GAN (Stage 3)
-This is where the magic happens. The GAN learns to take the compressed math and synthesize HD images.
-```python
-import torch
-from src.model.aether_codec import AetherCodec
-from src.train.dataset import get_dataloader
-from src.train.stage3 import train_stage3
+This is where the magic happens. The GAN learns to take the compressed math and synthesize HD images. It will automatically load the weights from Stage 2.
+```bash
+# Train Stage 3 (Outputs stage3_elite_final.pth)
+!python src/train/stage3.py
+```
 
-model = AetherCodec()
-model.load_state_dict(torch.load('stage2_refined.pth'))
-loader = get_dataloader('auto', batch_size=8)
-
-# The GAN synthesizes the final image
-model, ema = train_stage3(model, loader, epochs=50)
-torch.save(model.state_dict(), 'stage3_elite_final.pth')
-print("AetherCodec-Elite Training Complete!")
+### Step 4: Test the Telegram-Style Pipeline (Inference)
+Now that training is done and the checkpoint is saved (`stage3_elite_final.pth`), let's test the complete pipeline. We will grab an image, run it through the Sender, calculate the math payload size, and run it through the Receiver.
+```bash
+# Tests Sender -> Transmission -> Receiver Pipeline
+!python src/inference.py
 ```
 
 ---

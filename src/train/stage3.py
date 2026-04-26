@@ -90,3 +90,23 @@ def train_stage3(model, dataloader, epochs=50, device='cuda', ema=None):
         print(f"Epoch {epoch+1} Completed.")
         
     return model, ema
+
+if __name__ == "__main__":
+    from src.model.aether_codec import AetherCodec
+    from src.train.dataset import get_dataloader
+    import torch
+    import os
+    
+    print("Initializing AetherCodec Stage 3 Training (GAN)...")
+    model = AetherCodec()
+    if os.path.exists('stage2_refined.pth'):
+        model.load_state_dict(torch.load('stage2_refined.pth', weights_only=True))
+        print("Loaded Stage 2 weights.")
+    else:
+        print("Warning: stage2_refined.pth not found, starting from scratch.")
+        
+    loader = get_dataloader('auto', batch_size=8)
+    model, ema = train_stage3(model, loader, epochs=50)
+    
+    torch.save(model.state_dict(), 'stage3_elite_final.pth')
+    print("Stage 3 complete and saved to 'stage3_elite_final.pth'")

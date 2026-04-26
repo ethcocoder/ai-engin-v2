@@ -65,3 +65,23 @@ def train_stage2(model, dataloader, epochs=100, device='cuda', ema=None):
         print(f"Epoch {epoch+1} Completed. Avg Loss: {epoch_loss/len(dataloader):.4f}")
         
     return model, ema
+
+if __name__ == "__main__":
+    from src.model.aether_codec import AetherCodec
+    from src.train.dataset import get_dataloader
+    import torch
+    import os
+    
+    print("Initializing AetherCodec Stage 2 Training...")
+    model = AetherCodec()
+    if os.path.exists('stage1_foundation.pth'):
+        model.load_state_dict(torch.load('stage1_foundation.pth', weights_only=True))
+        print("Loaded Stage 1 weights.")
+    else:
+        print("Warning: stage1_foundation.pth not found, starting from scratch.")
+        
+    loader = get_dataloader('auto', batch_size=8)
+    model, ema = train_stage2(model, loader, epochs=100)
+    
+    torch.save(model.state_dict(), 'stage2_refined.pth')
+    print("Stage 2 complete and saved to 'stage2_refined.pth'")

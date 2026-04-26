@@ -58,3 +58,16 @@ def train_stage1(model, dataloader, epochs=100, device='cuda'):
         print(f"Epoch {epoch+1} Completed. Avg Loss: {epoch_loss/len(dataloader):.4f}")
         
     return model, ema
+
+if __name__ == "__main__":
+    from src.model.aether_codec import AetherCodec
+    from src.train.dataset import get_dataloader
+    import torch
+    
+    print("Initializing AetherCodec Stage 1 Training...")
+    model = AetherCodec()
+    loader = get_dataloader('auto', batch_size=8)
+    model, ema = train_stage1(model, loader, epochs=100)
+    
+    torch.save(model.state_dict(), 'stage1_foundation.pth')
+    print("Stage 1 complete and saved to 'stage1_foundation.pth'")
