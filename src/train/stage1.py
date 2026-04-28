@@ -73,8 +73,8 @@ def train_stage1(model, dataloader, epochs=100, device='cuda'):
             if batch_idx % 10 == 0:
                 pbar.set_postfix({
                     "loss": f"{loss.item():.4f}",
-                    "bpp": f"{loss_dict['bpp_loss'].item():.4f}",
-                    "mse": f"{loss_dict['d_loss'].item():.4f}"
+                    "bpp": f"{loss_dict['bpp_loss']:.4f}",
+                    "mse": f"{loss_dict['d_loss']:.4f}"
                 })
                 
         scheduler.step()

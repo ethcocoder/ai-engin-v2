@@ -33,7 +33,7 @@ print(f"✅ PyTorch {torch.__version__} initialized on {torch.cuda.get_device_na
 ### Stage 1: The Foundation (Core Compression)
 *Focus: Learning the base latent representation and GMM entropy model.*
 ```python
-!python src/train/stage1.py --epochs 25 --batch_size 16 --data_dir auto
+!python src/train/stage1.py --epochs 10 --batch_size 16 --data_dir auto
 ```
 
 ### Stage 2: Structural Refinement (The Perceptual Eye)

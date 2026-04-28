@@ -116,7 +116,8 @@ class AnalysisTransform(nn.Module):
     def _init_weights(self):
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='gelu')
+                # FIX 9: Explicit weight init (GELU -> RELU for gain calc)
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
             elif isinstance(m, nn.GroupNorm):
