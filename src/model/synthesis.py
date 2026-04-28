@@ -144,9 +144,13 @@ class SynthesisTransform(nn.Module):
             ))
             
             # Fuse skips from encoder [H/8, H/4, H/2]
-            self.skip_fusions.append(nn.Conv2d(
-                ch_out + self.skip_channels[i+1], ch_out, 1
-            ))
+            if i + 1 < len(self.skip_channels):
+                self.skip_fusions.append(nn.Conv2d(
+                    ch_out + self.skip_channels[i+1], ch_out, 1
+                ))
+            else:
+                # No skip for the final upsample (H/2 -> H)
+                self.skip_fusions.append(nn.Identity())
         
         # FIX 3: Tanh for smooth bounded colors
         self.to_rgb = nn.Sequential(
