@@ -121,9 +121,8 @@ class AetherCodec(nn.Module):
             metrics['bpp_y'] = -torch.log2(p_y).sum() / num_pixels
             metrics['bpp_z'] = torch.tensor(0.0, device=x.device)
         
-        # 4. Decode
         # ELITE AUDIT v5: Removed skips entirely for Honest P2P Transmission.
         # The SynthesisTransform now learns to reconstruct solely from the compressed latent.
-        x_hat = self.decoder(y_hat, skip_fusions=None)
+        x_hat = self.decoder(y_hat, encoder_skips=None)
         
         return x_hat, likelihoods, metrics
