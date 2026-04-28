@@ -25,8 +25,8 @@ class STEQuantize(torch.autograd.Function):
         residual = (outputs - inputs) / (step_size + 1e-8)
         grad_step = (residual * grad_output).sum(dim=(0, 2, 3), keepdim=True)
         
-        # Reshape to match Parameter shape (C,)
-        return grad_input, grad_step.view(-1)
+        # Maintain [1, C, 1, 1] shape to match the input to forward
+        return grad_input, grad_step
 
 class SovereignQuantizer(nn.Module):
     """
