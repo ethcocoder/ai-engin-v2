@@ -125,7 +125,7 @@ def train_stage3(model, dataloader, epochs=50, device='cuda', ema=None):
                     "G": f"{total_g_loss.item():.3f}",
                     "D": f"{d_loss.item():.3f}",
                     "Conf": f"R:{adv_metrics['d_real_conf']:.2f} F:{adv_metrics['d_fake_conf']:.2f}",
-                    "bpp": f"{rd_loss_dict['bpp_loss'].item():.3f}"
+                    "bpp": f"{rd_loss_dict['bpp_loss']:.3f}"
                 })
                 
         scheduler_G.step()
