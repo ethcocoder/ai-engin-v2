@@ -125,11 +125,21 @@ if __name__ == "__main__":
     print(f"Epochs: {args.epochs}, Batch Size: {args.batch_size}, Data: {args.data_dir}")
     
     model = AetherCodec()
-    if os.path.exists('stage1_foundation.pth'):
-        model.load_state_dict(torch.load('stage1_foundation.pth', weights_only=True))
-        print("Loaded Stage 1 weights.")
+    # Search for latest weights from Stage 1
+    found_weights = None
+    for f in ['stage1_latest.pth', 'stage1_foundation.pth', 'stage1_epoch_10.pth']:
+        if os.path.exists(f):
+            found_weights = f
+            break
+            
+    if found_weights:
+        state = torch.load(found_weights, weights_only=True)
+        # Handle full checkpoints vs raw state_dicts
+        weights = state['state_dict'] if 'state_dict' in state else state
+        model.load_state_dict(weights, strict=False)
+        print(f"✅ Loaded Stage 1 weights from {found_weights}")
     else:
-        print("Warning: stage1_foundation.pth not found, starting from scratch.")
+        print("⚠️ Warning: No Stage 1 weights found, starting from scratch.")
         
     loader = get_dataloader(args.data_dir, batch_size=args.batch_size)
     model, ema = train_stage2(model, loader, epochs=args.epochs)

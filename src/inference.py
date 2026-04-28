@@ -37,10 +37,11 @@ def run_inference(image_path, model_path, device='cuda'):
     if os.path.exists(model_path):
         state_dict = torch.load(model_path, map_location=device, weights_only=True)
         # Handle both raw state_dicts and training checkpoints
+        # FIX: Use strict=False to handle the transition from static to dynamic Swin masks
         if 'state_dict' in state_dict:
-            model.load_state_dict(state_dict['state_dict'])
+            model.load_state_dict(state_dict['state_dict'], strict=False)
         else:
-            model.load_state_dict(state_dict)
+            model.load_state_dict(state_dict, strict=False)
         print(f"✅ Loaded Elite weights from {model_path}")
     else:
         print(f"⚠️  Warning: {model_path} not found. Using random weights.")
