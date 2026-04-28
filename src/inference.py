@@ -50,6 +50,15 @@ def run_inference(image_path, model_path, device='cuda'):
     coder = ParadoxEntropyCoder()
     
     # 1. Load and Prepare Image
+    if os.path.isdir(image_path):
+        import random
+        all_imgs = [os.path.join(image_path, f) for f in os.listdir(image_path) if f.endswith(('.jpg', '.png', '.jpeg'))]
+        if not all_imgs:
+            print(f"❌ Error: No images found in {image_path}")
+            return
+        image_path = random.choice(all_imgs)
+        print(f"🎲 Selected random image: {image_path}")
+
     if not os.path.exists(image_path):
         print(f"❌ Error: Image {image_path} not found. Generating dummy...")
         x = torch.randn(1, 3, 512, 512).to(device)
@@ -74,14 +83,14 @@ def run_inference(image_path, model_path, device='cuda'):
         y, _ = model.encoder(x, return_skips=True)
         
         # Sovereign Quantization
-        y_hat, y_step = model.y_quantizer(y, force_hard=True)
+        y_hat, y_step = model.y_quantizer(y, hard_prob=1.0)
         
         # Hyperprior Analysis (On quantized y_hat for honesty)
         z_hat = torch.zeros(1, 1, 1, 1).to(device)
         z_step = torch.ones(1, 1, 1, 1).to(device)
         
         if model.use_hyperprior:
-            z_hat, z_step, _ = model.hyperprior(y_hat, force_hard=True)
+            z_hat, z_step, _ = model.hyperprior(y_hat, hard_prob=1.0)
         
         # Binary Compression
         file_path = "output.padox"
