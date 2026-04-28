@@ -43,10 +43,11 @@ class RateDistortionLoss(nn.Module):
         self.current_epoch = epoch
         
     def _normalize_for_ssim(self, x):
-        """Ensures input is in [0, 1] for MS-SSIM structural calculation."""
-        if x.min() < 0:
-            return (x + 1) / 2
-        return x
+        """
+        Force-normalizes images from the dataset's [-1, 1] range to [0, 1].
+        This ensures MS-SSIM always operates on a standardized structural range.
+        """
+        return (x + 1) / 2
             
     def forward(self, x, x_hat, likelihoods, y=None):
         """

@@ -79,9 +79,10 @@ def ms_ssim(img1, img2, data_range=2.0):
     mssim = torch.stack(mssim)
     mcs = torch.stack(mcs)
 
-    # Calculate MS-SSIM formula
-    pow1 = mcs ** weights[:len(mcs)]
-    pow2 = mssim ** weights[:len(mssim)]
+    # FIX: Add relu guard to prevent NaN when mcs/mssim are negative 
+    # (happens with random noise in early training)
+    pow1 = torch.relu(mcs) ** weights[:len(mcs)]
+    pow2 = torch.relu(mssim) ** weights[:len(mssim)]
     
     res = torch.prod(pow1[:-1]) * pow2[-1]
     return res

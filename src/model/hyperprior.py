@@ -118,11 +118,8 @@ class Hyperprior(nn.Module):
         return z_hat, z_step, hs_features
 
     def get_gmm_params(self, hs_features, ctx_features):
-        # FIX 8: Enforce strict causality to prevent information leakage
-        H, W = ctx_features.shape[-2:]
-        causal_mask = torch.tril(torch.ones(H, W, device=ctx_features.device))
-        ctx_features = ctx_features * causal_mask[None, None, :, :]
-        
+        # FIX 8: Raster-scan causality is already strictly enforced by MaskedConv2d.
+        # Removing redundant/incorrect 2D tril mask to restore full context power.
         combined = torch.cat([hs_features, ctx_features], dim=1)
         params = self.param_net(combined)
         B, _, H, W = params.shape
