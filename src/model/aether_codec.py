@@ -25,7 +25,6 @@ class AetherCodec(nn.Module):
         
         self.encoder = AnalysisTransform(
             in_channels=3, 
-            base_channels=128, 
             latent_dim=192
         )
         self.decoder = SynthesisTransform(latent_channels=192)
