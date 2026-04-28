@@ -19,7 +19,8 @@ class EntanglementRegularizer(nn.Module):
         """
         B, C, H, W = y.shape
         # Treat spatial positions as the 'environment' and channels as the 'subsystem'
-        y_flat = y.view(B, C, -1)  # (B, C, N)
+        # FIX: Force float32 for matrix multiplication to prevent overflow in Mixed Precision
+        y_flat = y.view(B, C, -1).to(torch.float32)  # (B, C, N)
         
         # Reduced density matrix: rho[b]_ij = (1/N) sum_k y[b,i,k] * y[b,j,k]
         # rho represents the correlation state between channels.
