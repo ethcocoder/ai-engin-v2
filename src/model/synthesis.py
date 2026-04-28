@@ -159,12 +159,11 @@ class SynthesisTransform(nn.Module):
         )
         
         self.rrn = ResidualRefinementNetwork(
-            in_channels=out_channels, feature_channels=hidden_channels[0]
+            in_channels=out_channels, feature_channels=hidden_channels[-1]
         )
     
     def forward(self, y_hat, encoder_skips=None):
         x = self.feature_extractor(y_hat)
-        deep_features = x
         
         # Stage 0 Fusion: H/16
         if encoder_skips is not None:
@@ -187,14 +186,14 @@ class SynthesisTransform(nn.Module):
                     x = torch.cat([x, skip], dim=1)
                     x = self.skip_fusions[i](x)
         
+        # Final lightweight features for refinement
+        refinement_features = x # (B, 32, 512, 512)
+        
         # Base reconstruction
         recon = self.to_rgb(x)
         
-        # Final Honest Refinement
-        if deep_features.shape[-2:] != recon.shape[-2:]:
-            deep_features = F.interpolate(deep_features, size=recon.shape[-2:], mode='bilinear')
-        
-        final = self.rrn(recon, deep_features)
+        # Final Honest Refinement using lightweight features
+        final = self.rrn(recon, refinement_features)
         
         # Final safety clamp
         return torch.clamp(final, -1.0, 1.0)
