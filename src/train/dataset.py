@@ -4,6 +4,7 @@ import zipfile
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
+import torch
 
 def download_and_extract_div2k(root_dir="dataset"):
     """
@@ -20,7 +21,7 @@ def download_and_extract_div2k(root_dir="dataset"):
     os.makedirs(root_dir, exist_ok=True)
     
     if not os.path.exists(zip_path):
-        print(f"Downloading DIV2K dataset from {dataset_url}...")
+        print(f"Downloading DIV2K dataset from {dataset_url} (approx 3.5GB)...")
         urllib.request.urlretrieve(dataset_url, zip_path)
         print("Download complete!")
 
@@ -34,18 +35,26 @@ def download_and_extract_div2k(root_dir="dataset"):
 class ImageFolderDataset(Dataset):
     def __init__(self, root_dir, transform=None):
         self.root_dir = root_dir
+        # Expert Filter: Only include valid image files
         self.image_files = [
             os.path.join(root_dir, f) for f in os.listdir(root_dir)
-            if f.lower().endswith(('.png', '.jpg', '.jpeg'))
+            if f.lower().endswith(('.png', '.jpg', '.jpeg', '.webp'))
         ]
         self.transform = transform
+        if len(self.image_files) == 0:
+            raise RuntimeError(f"No images found in {root_dir}")
 
     def __len__(self):
         return len(self.image_files)
 
     def __getitem__(self, idx):
         img_path = self.image_files[idx]
-        image = Image.open(img_path).convert('RGB')
+        try:
+            image = Image.open(img_path).convert('RGB')
+        except Exception as e:
+            print(f"Warning: Could not load {img_path}. Error: {e}")
+            # Fallback to another image if one is corrupted
+            return self.__getitem__((idx + 1) % len(self))
         
         if self.transform:
             image = self.transform(image)
@@ -53,26 +62,45 @@ class ImageFolderDataset(Dataset):
         return image, 0
 
 def get_dataloader(data_dir=None, batch_size=8, image_size=256, is_train=True):
-    # Automatically download the dataset if data_dir is not provided or set to 'auto'
+    """
+    Creates an Elite Dataloader for the AetherCodec engine.
+    Ensures natural statistics are preserved for high-fidelity reconstruction.
+    """
     if data_dir is None or data_dir == 'auto':
         data_dir = download_and_extract_div2k()
         
     if is_train:
+        # ELITE TRAINING AUGMENTATIONS
+        # We remove ColorJitter because we want the model to learn REAL color statistics.
+        # We add Resize(image_size) as a safety guard before the RandomCrop.
         transform = transforms.Compose([
+            transforms.Resize(image_size), # Safety Guard
             transforms.RandomCrop(image_size),
             transforms.RandomHorizontalFlip(),
-            transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.05),
+            transforms.RandomVerticalFlip(), # Added for structural variance
             transforms.ToTensor(),
+            # Correctly maps [0, 1] to [-1, 1] for Tanh decoder
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
         ])
     else:
+        # ELITE VALIDATION TRANSFORM
         transform = transforms.Compose([
+            transforms.Resize(image_size),
             transforms.CenterCrop(image_size),
             transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
         ])
         
     dataset = ImageFolderDataset(data_dir, transform=transform)
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=is_train, num_workers=2, drop_last=True)
+    
+    # num_workers set to 4 for faster data loading in Colab/Linux
+    dataloader = DataLoader(
+        dataset, 
+        batch_size=batch_size, 
+        shuffle=is_train, 
+        num_workers=4, 
+        drop_last=True,
+        pin_memory=True # Speed boost for CUDA
+    )
     
     return dataloader

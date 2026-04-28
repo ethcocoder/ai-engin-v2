@@ -4,61 +4,111 @@ import torch.nn.functional as F
 import math
 
 from .perceptual import LPIPSLoss
+from .entanglement import EntanglementRegularizer, SparsityRegularizer
 from ..utils.metrics import ms_ssim
 
 class RateDistortionLoss(nn.Module):
     """
-    Rate-Distortion loss for training the codec.
-    L = lambda_bpp * R + D
-    where R is the estimated entropy (bits per pixel)
-    and D is the multi-scale distortion term.
+    Elite Rate-Distortion Loss Engine.
+    L = lambda * (L1 + MS-SSIM + LPIPS) + Rate + lambda * (Quantum + Sparsity)
+    
+    Professionally balanced for stable training and high perceptual fidelity.
     """
-    def __init__(self, lmbda=0.01, use_ms_ssim=False, use_lpips=False):
+    def __init__(self, lmbda=0.01, use_ms_ssim=False, use_lpips=False, 
+                 use_entanglement=False, entanglement_weight=0.01,
+                 lpips_weight=0.1, lpips_warmup_epochs=10,
+                 max_bpp=10.0):
         super().__init__()
         self.lmbda = lmbda
         self.use_ms_ssim = use_ms_ssim
         self.use_lpips = use_lpips
+        self.use_entanglement = use_entanglement
+        self.lpips_weight = lpips_weight
+        self.lpips_warmup_epochs = lpips_warmup_epochs
+        self.max_bpp = max_bpp
+        self.current_epoch = 0
         
         self.l1_loss = nn.L1Loss()
         
+        # Expert Regularizers
+        self.entanglement_reg = EntanglementRegularizer(weight=entanglement_weight, use_renyi2=True)
+        self.sparsity_reg = SparsityRegularizer(weight=entanglement_weight)
+        
         if self.use_lpips:
+            # We use the official or elite custom implementation
             self.lpips_loss = LPIPSLoss()
             
-    def forward(self, x, x_hat, likelihoods):
+    def set_epoch(self, epoch):
+        """Allows for loss schedules and warmups."""
+        self.current_epoch = epoch
+        
+    def _normalize_for_ssim(self, x):
+        """Ensures input is in [0, 1] for MS-SSIM structural calculation."""
+        if x.min() < 0:
+            return (x + 1) / 2
+        return x
+            
+    def forward(self, x, x_hat, likelihoods, y=None):
         """
-        x: original image (B, 3, H, W)
-        x_hat: reconstructed image (B, 3, H, W)
-        likelihoods: dictionary with 'y' and optionally 'z' likelihoods
+        Calculates the multi-component RD objective.
         """
         N, _, H, W = x.shape
         num_pixels = N * H * W
         
         # 1. Rate (Bits Per Pixel)
-        # -log2(p) to get bits. Add epsilon to prevent log(0) -> NaN
         bpp_loss = 0.0
         for likelihood in likelihoods.values():
-            bpp = torch.log(likelihood + 1e-9).sum() / (-math.log(2) * num_pixels)
+            # FIX 5: Clamp likelihood to prevent -log2(0) explosions
+            likelihood = torch.clamp(likelihood, min=1e-10)
+            bpp = -torch.log2(likelihood).sum() / num_pixels
+            # FIX 5: Cap max bpp per component for stability
+            bpp = torch.clamp(bpp, max=self.max_bpp)
             bpp_loss += bpp
             
         # 2. Distortion
-        # L1 Loss
-        d_loss = self.l1_loss(x, x_hat)
+        l1_val = self.l1_loss(x, x_hat)
+        d_loss = l1_val
         
-        # MS-SSIM Loss (Data range is 2.0 because images are [-1, 1])
+        # MS-SSIM (FIX 2: Range awareness)
+        ms_ssim_val = None
         if self.use_ms_ssim:
-            ms_ssim_val = ms_ssim(x, x_hat, data_range=2.0)
+            x_norm = self._normalize_for_ssim(x)
+            x_hat_norm = self._normalize_for_ssim(x_hat)
+            ms_ssim_val = ms_ssim(x_norm, x_hat_norm, data_range=1.0)
             d_loss += 0.5 * (1.0 - ms_ssim_val)
             
-        # LPIPS Loss
-        if self.use_lpips:
+        # LPIPS (FIX 3: Warmup schedule)
+        lpips_val = None
+        if self.use_lpips and self.current_epoch >= self.lpips_warmup_epochs:
             lpips_val = self.lpips_loss(x, x_hat)
-            d_loss += 0.1 * lpips_val
+            # Linear weight annealing
+            effective_weight = min(
+                self.lpips_weight,
+                0.05 + 0.05 * max(0, self.current_epoch - self.lpips_warmup_epochs) / 20
+            )
+            d_loss += effective_weight * lpips_val
             
-        # Total Loss
-        total_loss = self.lmbda * d_loss + bpp_loss
+        # 3. Regularization (Quantum & Sparsity)
+        reg_loss = 0.0
+        ent_val = 0.0
+        spa_val = 0.0
+        if y is not None and self.use_entanglement:
+            ent_val = self.entanglement_reg(y)
+            spa_val = self.sparsity_reg(y)
+            reg_loss = ent_val + spa_val
+            
+        # FIX 4: Scale distortion and regularization by lambda to maintain priority balance
+        total_loss = self.lmbda * d_loss + bpp_loss + self.lmbda * reg_loss
         
+        # FIX 6: Comprehensive Metrics Return
         return {
             'loss': total_loss,
-            'bpp_loss': bpp_loss,
-            'd_loss': d_loss
+            'bpp_loss': bpp_loss.item() if isinstance(bpp_loss, torch.Tensor) else bpp_loss,
+            'd_loss': d_loss.item() if isinstance(d_loss, torch.Tensor) else d_loss,
+            'l1_loss': l1_val.item(),
+            'ms_ssim_loss': (1.0 - ms_ssim_val).item() if ms_ssim_val is not None else 0.0,
+            'lpips_loss': lpips_val.item() if lpips_val is not None else 0.0,
+            'reg_loss': reg_loss.item() if isinstance(reg_loss, torch.Tensor) else reg_loss,
+            'ent_loss': ent_val.item() if isinstance(ent_val, torch.Tensor) else 0.0,
+            'spa_loss': spa_val.item() if isinstance(spa_val, torch.Tensor) else 0.0
         }

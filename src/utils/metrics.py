@@ -12,23 +12,17 @@ def create_window(window_size, channel=1):
     window = _2D_window.expand(channel, 1, window_size, window_size).contiguous()
     return window
 
-def ssim(img1, img2, window_size=11, window=None, size_average=True, full=False, val_range=None):
-    if val_range is None:
-        if torch.max(img1) > 128:
-            max_val = 255
-        else:
-            max_val = 1
-            
-        if torch.min(img1) < -0.5:
-            max_val = 2
-    else:
-        max_val = val_range
-
-    padd = 0
+def ssim(img1, img2, window_size=11, window=None, size_average=True, full=False, val_range=2.0):
+    """
+    Elite SSIM Implementation.
+    Uses 'same' padding to ensure edge-to-edge structural evaluation.
+    """
+    # FIX: Use 'same' padding (window_size // 2)
+    padd = window_size // 2
     (_, channel, height, width) = img1.size()
+    
     if window is None:
-        real_size = min(window_size, height, width)
-        window = create_window(real_size, channel=channel).to(img1.device)
+        window = create_window(window_size, channel=channel).to(img1.device)
 
     mu1 = F.conv2d(img1, window, padding=padd, groups=channel)
     mu2 = F.conv2d(img2, window, padding=padd, groups=channel)
@@ -41,8 +35,8 @@ def ssim(img1, img2, window_size=11, window=None, size_average=True, full=False,
     sigma2_sq = F.conv2d(img2 * img2, window, padding=padd, groups=channel) - mu2_sq
     sigma12 = F.conv2d(img1 * img2, window, padding=padd, groups=channel) - mu1_mu2
 
-    C1 = (0.01 * max_val) ** 2
-    C2 = (0.03 * max_val) ** 2
+    C1 = (0.01 * val_range) ** 2
+    C2 = (0.03 * val_range) ** 2
 
     v1 = 2.0 * sigma12 + C2
     v2 = sigma1_sq + sigma2_sq + C2
@@ -59,9 +53,10 @@ def ssim(img1, img2, window_size=11, window=None, size_average=True, full=False,
         return ret, cs
     return ret
 
-def ms_ssim(img1, img2, data_range=1.0):
+def ms_ssim(img1, img2, data_range=2.0):
     """
     Multi-scale Structural Similarity Index Measure.
+    Correctly calibrated for [-1, 1] or [0, 1] via data_range.
     """
     device = img1.device
     weights = torch.FloatTensor([0.0448, 0.2856, 0.3001, 0.2363, 0.1333]).to(device)
@@ -69,30 +64,30 @@ def ms_ssim(img1, img2, data_range=1.0):
     mssim = []
     mcs = []
     
-    val_range = data_range
-
     for _ in range(levels):
-        sim, cs = ssim(img1, img2, window_size=11, size_average=True, full=True, val_range=val_range)
+        sim, cs = ssim(img1, img2, window_size=11, size_average=True, full=True, val_range=data_range)
         mssim.append(sim)
         mcs.append(cs)
         
-        img1 = F.avg_pool2d(img1, (2, 2))
-        img2 = F.avg_pool2d(img2, (2, 2))
+        # Anti-aliased downsampling for next scale
+        if img1.shape[2] > 2 and img1.shape[3] > 2:
+            img1 = F.avg_pool2d(img1, (2, 2))
+            img2 = F.avg_pool2d(img2, (2, 2))
+        else:
+            break
 
     mssim = torch.stack(mssim)
     mcs = torch.stack(mcs)
 
-    mssim = torch.relu(mssim)
-    mcs = torch.relu(mcs)
-
-    # Calculate MS-SSIM
-    pow1 = mcs ** weights
-    pow2 = mssim ** weights
+    # Calculate MS-SSIM formula
+    pow1 = mcs ** weights[:len(mcs)]
+    pow2 = mssim ** weights[:len(mssim)]
     
     res = torch.prod(pow1[:-1]) * pow2[-1]
     return res
 
-def psnr(img1, img2, data_range=1.0):
+def psnr(img1, img2, data_range=2.0):
+    """Peak Signal-to-Noise Ratio."""
     mse = F.mse_loss(img1, img2)
     if mse == 0:
         return torch.tensor(float('inf'))

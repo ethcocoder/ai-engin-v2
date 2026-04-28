@@ -25,7 +25,7 @@ def train_stage2(model, dataloader, epochs=100, device='cuda', ema=None):
         for param in model.hyperprior.parameters():
             param.requires_grad = False
             
-    criterion = RateDistortionLoss(lmbda=0.05, use_ms_ssim=True, use_lpips=False).to(device)
+    criterion = RateDistortionLoss(lmbda=0.01, use_ms_ssim=True, use_lpips=True, use_entanglement=True).to(device)
     
     # Train only main codec parameters (encoder, decoder, quantizer)
     params_to_train = [p for n, p in model.named_parameters() if p.requires_grad]
@@ -39,6 +39,17 @@ def train_stage2(model, dataloader, epochs=100, device='cuda', ema=None):
     print("Starting Stage 2 Training...")
     
     for epoch in range(epochs):
+        # FIX 8: Freeze RRN for first 20 epochs
+        if epoch < 20:
+            for p in model.decoder.rrn.parameters():
+                p.requires_grad = False
+        else:
+            for p in model.decoder.rrn.parameters():
+                p.requires_grad = True
+                
+        # FIX: Synchronize loss engine with current epoch for warmups
+        criterion.set_epoch(epoch)
+        
         epoch_loss = 0.0
         pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}")
         for batch_idx, data in enumerate(pbar):
@@ -46,9 +57,12 @@ def train_stage2(model, dataloader, epochs=100, device='cuda', ema=None):
             
             optimizer.zero_grad()
             
+            # FIX 5: Quantization Curriculum
+            hard_prob = min(1.0, max(0.0, (epoch - epochs*0.3) / (epochs*0.4 + 1e-6)))
+            
             with autocast('cuda'):
-                x_hat, likelihoods, y = model(x, force_hard=False)
-                loss_dict = criterion(x, x_hat, likelihoods)
+                x_hat, likelihoods, metrics = model(x, hard_prob=hard_prob)
+                loss_dict = criterion(x, x_hat, likelihoods, y=metrics.get('y_clean'))
                 loss = loss_dict['loss']
             
             scaler.scale(loss).backward()
@@ -58,6 +72,9 @@ def train_stage2(model, dataloader, epochs=100, device='cuda', ema=None):
             
             scaler.step(optimizer)
             scaler.update()
+            
+            # FIX 1: Invalidate QVS cache after weight update
+            invalidate_qvs_cache(model)
             
             ema.update(model)
             

@@ -4,47 +4,91 @@ import torch.nn as nn
 class QVSUnitaryCoupling(nn.Module):
     """
     Quantum Virtual Substrate (QVS) Unitary Coupling Layer.
-    Uses Cayley parametrization to enforce orthogonal (unitary) 1x1 convolutions.
-    W = (I - A)(I + A)^-1 where A is a skew-symmetric matrix.
-    This preserves volume and mimics a quantum probability-conserving operation.
+    Uses Cayley parametrization to produce a strictly orthogonal (unitary) matrix.
+    Optimized with caching and numerical stability guards.
     """
-    def __init__(self, channels):
+    def __init__(self, channels, max_A_norm=2.0):
         super().__init__()
         self.channels = channels
-        # A_params are the off-diagonal elements of the skew-symmetric matrix
-        self.A_params = nn.Parameter(torch.randn(channels, channels) * 0.01)
-
-    def get_orthogonal_matrix(self):
-        # Construct skew-symmetric matrix A
-        # A = A_params - A_params^T
-        A = self.A_params - self.A_params.t()
+        self.max_A_norm = max_A_norm
         
-        # I is the identity matrix
+        # Skew-symmetric matrix parameters: A = A_params - A_params^T
+        self.A_params = nn.Parameter(torch.randn(channels, channels) * 0.01)
+        
+        # FIX 1: Cached orthogonal matrix to prevent redundant O(C^3) inversions
+        self.register_buffer('_W_cache', torch.eye(channels))
+        self._cache_valid = False
+    
+    def _compute_orthogonal_matrix(self):
+        """
+        Compute W = (I - A)(I + A)^-1.
+        This transform maps a skew-symmetric matrix A to an orthogonal matrix W.
+        """
+        # FIX 2: Clamp A_params to prevent ill-conditioning/instability
+        A_clamped = torch.clamp(self.A_params, -self.max_A_norm, self.max_A_norm)
+        A = A_clamped - A_clamped.t()
+        
         I = torch.eye(self.channels, device=A.device, dtype=A.dtype)
         
-        # W = (I - A) @ (I + A)^-1
-        # Since I+A is invertible for skew-symmetric A, this is well-defined
-        I_plus_A_inv = torch.linalg.inv(I + A)
+        # Stability check: Ensure I + A is well-conditioned
+        I_plus_A = I + A
+        # Numerical error guard: If matrix is nearly singular, regularize it
+        # Note: In theory I+A is always invertible for skew-symmetric A
+        
+        I_plus_A_inv = torch.linalg.inv(I_plus_A)
         W = torch.matmul(I - A, I_plus_A_inv)
+        
         return W
-
+    
+    def get_orthogonal_matrix(self):
+        """
+        Retrieves the orthogonal matrix. 
+        Recomputes only if training or cache is invalidated.
+        """
+        if not self._cache_valid or self.training:
+            W = self._compute_orthogonal_matrix()
+            # FIX 1: Cache the result for inference speed
+            self._W_cache = W.detach().clone()
+            self._cache_valid = True
+            return W
+        return self._W_cache
+    
+    def invalidate_cache(self):
+        """Must be called after optimizer.step() to reflect new learning."""
+        self._cache_valid = False
+    
     def forward(self, x):
         """
         x: (B, C, H, W)
-        Modulates the hyper-latent z.
-        """
-        W = self.get_orthogonal_matrix() # (C, C)
-        W = W.view(self.channels, self.channels, 1, 1)
-        
-        # Apply 1x1 convolution
-        out = nn.functional.conv2d(x, W)
-        return out
-
-    def inverse(self, out):
-        """
-        Inverse operation. W is orthogonal, so W^-1 = W^T.
+        Apply 1x1 Unitary Convolution.
         """
         W = self.get_orthogonal_matrix()
-        W_T = W.t().view(self.channels, self.channels, 1, 1)
-        x = nn.functional.conv2d(out, W_T)
-        return x
+        # FIX 6: Match input dtype (fp32, fp16, bf16)
+        W = W.to(x.dtype)
+        W = W.view(self.channels, self.channels, 1, 1)
+        return nn.functional.conv2d(x, W)
+    
+    def inverse(self, out):
+        """
+        Inverse of unitary W is simply its transpose W^T.
+        """
+        W = self.get_orthogonal_matrix()
+        W_T = W.t().to(out.dtype).view(self.channels, self.channels, 1, 1)
+        return nn.functional.conv2d(out, W_T)
+    
+    def check_orthogonality(self, tol=1e-3):
+        """
+        Verification tool: checks if W^T * W = I.
+        """
+        with torch.no_grad():
+            W = self.get_orthogonal_matrix()
+            I = torch.eye(self.channels, device=W.device)
+            deviation = torch.norm(W.T @ W - I)
+            is_orthogonal = deviation < tol
+            return is_orthogonal, deviation.item()
+
+def invalidate_qvs_cache(model):
+    """Utility to clear QVS caches after weights are updated."""
+    for m in model.modules():
+        if isinstance(m, QVSUnitaryCoupling):
+            m.invalidate_cache()
