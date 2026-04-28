@@ -37,14 +37,14 @@ class AetherCodec(nn.Module):
                 num_components=3
             )
 
-    def forward(self, x, force_hard=None):
+    def forward(self, x, hard_prob=None):
         """
         Args:
             x: (B, 3, H, W), values in [-1, 1]
-            force_hard: If None, auto-select based on training mode
+            hard_prob: Probability of using hard quantization (0.0 to 1.0)
         """
-        if force_hard is None:
-            force_hard = not self.training
+        if hard_prob is None:
+            hard_prob = not self.training
         
         B, _, H, W = x.shape
         num_pixels = B * H * W
@@ -56,7 +56,7 @@ class AetherCodec(nn.Module):
             y, skips = self.encoder(x, return_skips=True)
         
         # 2. Quantize main latent
-        y_hat, y_step = self.y_quantizer(y, force_hard=force_hard)
+        y_hat, y_step = self.y_quantizer(y, hard_prob=hard_prob)
         
         likelihoods = {}
         metrics = {'y_hat': y_hat, 'y_step': y_step, 'y_clean': y}
@@ -65,7 +65,7 @@ class AetherCodec(nn.Module):
         if self.use_hyperprior:
             # CRITICAL FIX: hyperprior encodes y_hat, not y
             z_hat, z_step, hs_features = self.hyperprior(
-                y_hat, force_hard=force_hard
+                y_hat, hard_prob=hard_prob
             )
             metrics['z_hat'] = z_hat
             metrics['z_step'] = z_step
