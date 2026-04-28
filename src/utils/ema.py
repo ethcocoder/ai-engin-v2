@@ -39,7 +39,8 @@ class EMA:
                 # FIX: lerp only works on floating point tensors. 
                 # For integer buffers (like Swin indices), we just copy.
                 if torch.is_floating_point(data):
-                    self.shadow[name].lerp_(data, 1.0 - self.decay)
+                    # FIX: Sync dtype for Mixed-Precision (Autocast) compatibility
+                    self.shadow[name].lerp_(data.to(self.shadow[name].dtype), 1.0 - self.decay)
                 else:
                     self.shadow[name].copy_(data)
 
