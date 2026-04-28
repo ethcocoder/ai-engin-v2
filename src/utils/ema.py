@@ -36,9 +36,12 @@ class EMA:
         """
         for name, data in self._get_model_state(model).items():
             if name in self.shadow:
-                # Elite Optimization: lerp_ is faster and avoids memory fragmentation
-                # shadow = shadow + (1 - decay) * (live - shadow)
-                self.shadow[name].lerp_(data, 1.0 - self.decay)
+                # FIX: lerp only works on floating point tensors. 
+                # For integer buffers (like Swin indices), we just copy.
+                if torch.is_floating_point(data):
+                    self.shadow[name].lerp_(data, 1.0 - self.decay)
+                else:
+                    self.shadow[name].copy_(data)
 
     def apply_shadow(self, model):
         """Overwrites model weights with EMA shadow weights."""
