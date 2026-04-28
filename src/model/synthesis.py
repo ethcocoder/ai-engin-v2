@@ -106,10 +106,10 @@ class SynthesisTransform(nn.Module):
     The Elite Decoder Body.
     Implements U-Net skip fusion and hierarchical upsampling.
     """
-    def __init__(self, latent_channels=192, hidden_channels=[512, 256, 128, 64], out_channels=3):
+    def __init__(self, latent_channels=192, hidden_channels=[512, 256, 128, 64, 32], out_channels=3):
         super().__init__()
         
-        # Aligned with AnalysisTransform channels
+        # Aligned with AnalysisTransform channels: [H/16, H/8, H/4, H/2]
         self.skip_channels = [192, 256, 128, 64]
         
         # Feature extractor (FIX 9: Deep extraction from latent)
