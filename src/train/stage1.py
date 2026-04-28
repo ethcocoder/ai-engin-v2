@@ -27,7 +27,8 @@ def train_stage1(model, dataloader, epochs=100, device='cuda'):
         p.requires_grad = False
         
     criterion = RateDistortionLoss(lmbda=0.01, use_ms_ssim=False, use_lpips=False, use_entanglement=True).to(device)
-    optimizer = AdamW(model.parameters(), lr=1e-4, betas=(0.9, 0.999), weight_decay=1e-4)
+    # FIX: Lower LR (5e-5) for 'Honest' architecture stability
+    optimizer = AdamW(model.parameters(), lr=5e-5, betas=(0.9, 0.999), weight_decay=1e-4)
     scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=50, T_mult=2)
     scaler = GradScaler('cuda')
     ema = EMA(model, decay=0.999)
@@ -53,6 +54,12 @@ def train_stage1(model, dataloader, epochs=100, device='cuda'):
                 x_hat, likelihoods, metrics = model(x, hard_prob=hard_prob)
                 loss_dict = criterion(x, x_hat, likelihoods, y=metrics.get('y_clean'))
                 loss = loss_dict['loss']
+            
+            # ELITE AUDIT v5: NaN Safety Guard
+            if torch.isnan(loss):
+                print(f"⚠️ Warning: NaN Loss detected in Batch {batch_idx}. Skipping...")
+                optimizer.zero_grad()
+                continue
             
             scaler.scale(loss).backward()
             

@@ -128,8 +128,9 @@ class Hyperprior(nn.Module):
         weights = params[:, :, :, 0]
         means = params[:, :, :, 1]
         
-        # FIX 4: Clamp scales to prevent exp explosion and NaN crashes
-        scales = torch.exp(torch.clamp(params[:, :, :, 2], -10, 10))
+        # FIX 4: Tighter clamps and epsilon for GMM stability
+        # Adding 1e-6 ensures the scale is NEVER zero even if exp() underflows.
+        scales = torch.exp(torch.clamp(params[:, :, :, 2], -5, 5)) + 1e-6
         
         # FIX 5: Temperature-controlled softmax for balanced component usage
         temperature = 0.5
