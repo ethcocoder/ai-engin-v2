@@ -72,7 +72,7 @@ class Hyperprior(nn.Module):
         
         # Parameter prediction (FIX 7: Depthwise separable for 1.7K channel efficiency)
         self.param_net = nn.Sequential(
-            nn.Conv2d(hyper_dim*4, hyper_dim*2, 1),
+            nn.Conv2d(hyper_dim*3, hyper_dim*2, 1), # hyper_dim*3 = 384
             nn.GroupNorm(8, hyper_dim*2),
             nn.GELU(),
             nn.Conv2d(hyper_dim*2, hyper_dim*2, 3, padding=1, groups=hyper_dim*2),
