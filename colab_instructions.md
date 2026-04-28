@@ -6,17 +6,24 @@ This documentation guides you through training and deploying the **Honest Aether
 ---
 
 ## ⚡ 1. Setup Environment (Run Once)
-Copy and paste this block into a Colab cell to initialize the Elite environment.
-
+### Option A: Clone from GitHub (Recommended)
 ```python
-# 1. Install Expert Dependencies
+# Clone the Elite v5 Branch
+!git clone -b v5 https://github.com/ethcocoder/ai-engin-v2.git
+%cd ai-engin-v2
+
+# Install Expert Dependencies
 !pip install torch torchvision torchmetrics torchac lpips tqdm pillow
 !pip install -U --no-cache-dir gdown
 
-# 2. Verify CUDA (Crucial for Swin Transformers)
+# Verify CUDA (Crucial for Swin Transformers)
 import torch
 print(f"✅ PyTorch {torch.__version__} initialized on {torch.cuda.get_device_name(0)}")
 ```
+
+### Option B: Manual Upload
+1. Zip your local `src` folder and upload it to Colab.
+2. Run: `!unzip your_code.zip`
 
 ---
 
