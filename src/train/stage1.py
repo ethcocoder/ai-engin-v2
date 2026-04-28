@@ -27,8 +27,8 @@ def train_stage1(model, dataloader, epochs=100, device='cuda'):
         p.requires_grad = False
         
     criterion = RateDistortionLoss(lmbda=0.01, use_ms_ssim=False, use_lpips=False, use_entanglement=True).to(device)
-    # FIX: Lower LR (5e-5) for 'Honest' architecture stability
-    optimizer = AdamW(model.parameters(), lr=5e-5, betas=(0.9, 0.999), weight_decay=1e-4)
+    # FIX: Ultra-Low LR (1e-5) for 'Lockdown Build' stability
+    optimizer = AdamW(model.parameters(), lr=1e-5, betas=(0.9, 0.999), weight_decay=1e-4)
     scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=50, T_mult=2)
     scaler = GradScaler('cuda')
     ema = EMA(model, decay=0.999)
@@ -63,9 +63,10 @@ def train_stage1(model, dataloader, epochs=100, device='cuda'):
             
             scaler.scale(loss).backward()
             
-            # Gradient clipping
+            # Gradient clipping (Norm + Value for Lockdown Build)
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            torch.nn.utils.clip_grad_value_(model.parameters(), clip_value=1.0)
             
             scaler.step(optimizer)
             scaler.update()

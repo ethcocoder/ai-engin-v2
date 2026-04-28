@@ -132,8 +132,8 @@ class Hyperprior(nn.Module):
         # Adding 1e-6 ensures the scale is NEVER zero even if exp() underflows.
         scales = torch.exp(torch.clamp(params[:, :, :, 2], -5, 5)) + 1e-6
         
-        # FIX 5: Temperature-controlled softmax for balanced component usage
-        temperature = 0.5
+        # FIX 5: Soft GMM temperature (1.0) for Lockdown Build stability
+        temperature = 1.0
         weights = torch.softmax(weights / temperature, dim=2)
         
         return weights, means, scales
