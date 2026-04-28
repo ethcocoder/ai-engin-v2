@@ -51,9 +51,9 @@ class AetherCodec(nn.Module):
         
         # 1. Encode
         if self.training and self.use_checkpoint:
-            y, skips = checkpoint(self.encoder, x, True, use_reentrant=False)
+            y, _ = checkpoint(self.encoder, x, False, use_reentrant=False)
         else:
-            y, skips = self.encoder(x, return_skips=True)
+            y, _ = self.encoder(x, return_skips=False)
         
         # 2. Quantize main latent
         y_hat, y_step = self.y_quantizer(y, hard_prob=hard_prob)
@@ -122,8 +122,8 @@ class AetherCodec(nn.Module):
             metrics['bpp_z'] = torch.tensor(0.0, device=x.device)
         
         # 4. Decode
-        # Skips are only available if we are the sender (training) or simulating end-to-end.
-        # In real-world inference, skips=None.
-        x_hat = self.decoder(y_hat, encoder_skips=skips if self.training else None)
+        # ELITE AUDIT v5: Removed skips entirely for Honest P2P Transmission.
+        # The SynthesisTransform now learns to reconstruct solely from the compressed latent.
+        x_hat = self.decoder(y_hat, skip_fusions=None)
         
         return x_hat, likelihoods, metrics

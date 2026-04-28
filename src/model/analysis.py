@@ -145,4 +145,4 @@ class AnalysisTransform(nn.Module):
         if return_skips:
             # FIX 7: Reverse order for decoder [H/16, H/8, H/4, H/2]
             return x, skips[::-1]
-        return x
+        return x, None
