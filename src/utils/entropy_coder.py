@@ -99,8 +99,8 @@ class ParadoxEntropyCoder:
             
             # 5. RESCALE (The 'Elite' part)
             # We must turn integers back into the correct latent values using the steps
-            y_hat = torch.from_numpy(y_int).float().to(device)
-            z_hat = torch.from_numpy(z_int).float().to(device)
+            y_hat = torch.from_numpy(y_int.copy()).float().to(device)
+            z_hat = torch.from_numpy(z_int.copy()).float().to(device)
             
             y_step_t = torch.from_numpy(y_step_arr).to(device).view(1, -1, 1, 1)
             z_step_t = torch.from_numpy(z_step_arr).to(device).view(1, -1, 1, 1)
