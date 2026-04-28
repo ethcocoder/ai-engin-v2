@@ -1,0 +1,165 @@
+{
+  "project_name": "AetherCodec-Elite (ai-engin-v2 v4)",
+  "model_type": "hybrid (Learned Image Codec + Quantum-inspired Flow)",
+  "files_scanned": [
+    "src/model/aether_codec.py",
+    "src/model/analysis.py",
+    "src/model/synthesis.py",
+    "src/model/hyperprior.py",
+    "src/model/qvs_flow.py",
+    "src/model/quantizer.py",
+    "src/model/attention.py",
+    "src/model/discriminator.py",
+    "src/loss/rate_distortion.py",
+    "src/loss/perceptual.py",
+    "src/loss/adversarial.py",
+    "src/loss/entanglement.py",
+    "src/train/stage1.py",
+    "src/train/stage2.py",
+    "src/train/stage3.py",
+    "src/utils/metrics.py"
+  ],
+  "core_math": {
+    "forward_pass": {
+      "description": "The AetherCodec-Elite follows a Mean-Scale Hyperprior architecture. The Analysis Transform (Encoder) maps the input image x to a latent representation y. y is quantized to y_hat. A Hyperprior network maps y to a hyper-latent z, which is quantized to z_hat and modulated by a QVS Unitary Coupling layer. The Hyper-synthesis network and a spatial Context Model predict the parameters (weights, means, scales) of a Gaussian Mixture Model (GMM) for the distribution of y_hat. Finally, the Synthesis Transform (Decoder) reconstructs the image x_hat from y_hat, followed by a Residual Refinement Network.",
+      "source_file": "src/model/aether_codec.py",
+      "code": "    def forward(self, x, force_hard=False):\n        # 1. Encode\n        y = self.encoder(x) # (B, 192, H/16, W/16)\n        \n        # 2. Quantize latent\n        y_hat, y_step = self.y_quantizer(y, force_hard=force_hard)\n        \n        likelihoods = {}\n        \n        # 3. Hyperprior and Entropy Model\n        if self.use_hyperprior:\n            z_hat, hs_features = self.hyperprior(y, force_hard=force_hard)\n            ctx_features = self.hyperprior.context_conv(y_hat)\n            weights, means, scales = self.hyperprior.get_gmm_params(hs_features, ctx_features)\n            \n            # Gaussian PDF integration over quantization bin\n            y_hat_expanded = y_hat.unsqueeze(2)\n            dist = torch.distributions.Normal(means, scales)\n            step = y_step.unsqueeze(2)\n            lower = dist.cdf(y_hat_expanded - step / 2)\n            upper = dist.cdf(y_hat_expanded + step / 2)\n            p_y = (upper - lower) * weights\n            p_y = p_y.sum(dim=2)\n            p_y = torch.clamp(p_y, min=1e-9)\n            likelihoods['y'] = p_y\n            \n            # Factorized prior for z_hat\n            z_dist = torch.distributions.Normal(0.0, 1.0)\n            z_lower = z_dist.cdf(z_hat - 0.5)\n            z_upper = z_dist.cdf(z_hat + 0.5)\n            p_z = z_upper - z_lower\n            p_z = torch.clamp(p_z, min=1e-9)\n            likelihoods['z'] = p_z\n        \n        # 4. Decode\n        x_hat = self.decoder(y_hat, orig_input=x)\n        return x_hat, likelihoods, y",
+      "input_shapes": {
+        "x": "(B, 3, H, W)"
+      },
+      "output_shapes": {
+        "x_hat": "(B, 3, H, W)",
+        "likelihoods['y']": "(B, 192, H/16, W/16)",
+        "likelihoods['z']": "(B, 128, H/32, W/32)"
+      }
+    },
+    "loss_function": {
+      "description": "The Rate-Distortion loss optimizes L = lambda * D + R. The rate R is the bits-per-pixel (bpp) calculated from the negative log-likelihoods of y and z. The distortion D is a combination of L1 loss, MS-SSIM, and LPIPS. In Stage 3, an adversarial loss from a PatchGAN discriminator is added.",
+      "source_file": "src/loss/rate_distortion.py",
+      "code": "    def forward(self, x, x_hat, likelihoods):\n        # 1. Rate Loss (bpp)\n        bpp_loss = 0\n        num_pixels = x.shape[0] * x.shape[2] * x.shape[3]\n        for name, p in likelihoods.items():\n            # R = E[-log2 p(y_hat)]\n            bpp = torch.log(p).sum() / (-math.log(2) * num_pixels)\n            bpp_loss += bpp\n            \n        # 2. Distortion Loss\n        l1_loss = self.l1(x, x_hat)\n        d_loss = l1_loss\n        \n        if self.use_ms_ssim:\n            ssim_val = ms_ssim(x, x_hat, data_range=2.0)\n            d_loss += 0.5 * (1 - ssim_val)\n            \n        if self.use_lpips:\n            lpips_val = self.lpips(x, x_hat)\n            d_loss += 0.1 * lpips_val\n            \n        loss = self.lmbda * d_loss + bpp_loss\n        return {\"loss\": loss, \"bpp_loss\": bpp_loss, \"d_loss\": d_loss}",
+      "mathematical_properties": "Differentiable, Rate-Distortion trade-off controlled by lambda."
+    },
+    "optimization": {
+      "algorithm": "AdamW",
+      "source_file": "src/train/stage3.py",
+      "code": "        self.optimizer_G = torch.optim.AdamW(\n            self.model.parameters(), lr=2e-5, betas=(0.5, 0.9), weight_decay=1e-4\n        )\n        self.optimizer_D = torch.optim.AdamW(\n            self.discriminator.parameters(), lr=2e-5, betas=(0.5, 0.9), weight_decay=1e-4\n        )\n        self.scheduler_G = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(self.optimizer_G, T_0=50, T_mult=2)",
+      "learning_rate_schedule": "CosineAnnealingWarmRestarts",
+      "gradient_clipping": true,
+      "weight_decay": "1e-4"
+    }
+  },
+  "attention_mechanism": {
+    "type": "Swin Transformer",
+    "complexity": "O(n * window_size^2)",
+    "source_file": "src/model/attention.py",
+    "code": "class SwinBlock(nn.Module):\n    def __init__(self, dim, window_size=8, num_heads=8):\n        super().__init__()\n        self.norm1 = nn.GroupNorm(1, dim)\n        self.attn = WindowAttention(dim, window_size, num_heads, shift_size=0)\n        self.norm2 = nn.GroupNorm(1, dim)\n        self.attn_shifted = WindowAttention(dim, window_size, num_heads, shift_size=window_size//2)\n        self.mlp = nn.Sequential(\n            nn.Conv2d(dim, 4*dim, 1),\n            nn.GELU(),\n            nn.Conv2d(4*dim, dim, 1)\n        )",
+    "custom_modifications": "Integrated into Analysis and Synthesis transforms at the lowest resolution (H/16, W/16)."
+  },
+  "normalization": {
+    "type": "GroupNorm",
+    "source_files": [
+      "src/model/attention.py"
+    ],
+    "code": "self.norm1 = nn.GroupNorm(1, dim)",
+    "where_applied": "Before attention and MLP in SwinBlocks",
+    "eps_value": "default (1e-5)"
+  },
+  "activation_functions": {
+    "names": [
+      "GELU",
+      "Tanh",
+      "LeakyReLU"
+    ],
+    "source_files": [
+      "src/model/analysis.py",
+      "src/model/synthesis.py",
+      "src/model/discriminator.py"
+    ],
+    "code_snippets": {
+      "GELU": "nn.GELU()",
+      "Tanh": "nn.Tanh()",
+      "LeakyReLU": "nn.LeakyReLU(0.2)"
+    }
+  },
+  "positional_encoding": {
+    "type": "none (implicit via Swin windowing and convolutions)",
+    "max_sequence_length": null,
+    "source_file": null,
+    "code": null
+  },
+  "embedding_layers": {
+    "vocab_size": null,
+    "hidden_dim": null,
+    "source_file": null,
+    "code": null
+  },
+  "custom_components": [
+    {
+      "name": "QVS Unitary Coupling Layer",
+      "purpose": "Repurposed from v2, it now acts as a volume-preserving (unitary) transformation in the hyperprior space, mimicking quantum probability conservation.",
+      "math_description": "Uses Cayley parametrization: W = (I - A)(I + A)^-1 where A is a skew-symmetric matrix (A = P - P^T). This ensures W is orthogonal (W^T W = I) and det(W) = 1.",
+      "source_file": "src/model/qvs_flow.py",
+      "code": "    def get_orthogonal_matrix(self):\n        A = self.A_params - self.A_params.t()\n        I = torch.eye(self.channels, device=A.device, dtype=A.dtype)\n        I_plus_A_inv = torch.linalg.inv(I + A)\n        W = torch.matmul(I - A, I_plus_A_inv)\n        return W",
+      "is_novel": true,
+      "resembles_standard": "Orthogonal 1x1 convolution / Invertible Flow layer."
+    },
+    {
+      "name": "SovereignQuantizer (v4)",
+      "purpose": "Generalizes quantization with a learnable step size per channel and supports soft quantization (noise) during training and hard quantization (round) with STE during fine-tuning.",
+      "math_description": "Training: y_hat = y + uniform_noise(-0.5, 0.5) * step_size. Inference/Fine-tuning: y_hat = round(y / step_size) * step_size with Straight-Through Estimator.",
+      "source_file": "src/model/quantizer.py",
+      "code": "class SovereignQuantizer(nn.Module):\n    def forward(self, x, force_hard=False):\n        step = torch.clamp(self.step_size, min=1e-4)\n        if self.training and not force_hard:\n            # Soft quantization: add uniform noise\n            noise = torch.rand_like(x) - 0.5\n            return x + noise * step, step\n        else:\n            # Hard quantization with STE\n            return STEQuantize.apply(x, step), step",
+      "is_novel": true,
+      "resembles_standard": "Learned Step Size Quantization with STE."
+    },
+    {
+      "name": "Residual Refinement Network (RRN)",
+      "purpose": "A post-processing module that takes the reconstructed image and (during training) the original input to output a residual correction map, improving high-frequency detail.",
+      "math_description": "x_final = x_recon + RRN(concat(x_recon, x_orig))",
+      "source_file": "src/model/synthesis.py",
+      "code": "class ResidualRefinementNetwork(nn.Module):\n    def forward(self, recon, orig=None):\n        if orig is None:\n            orig = recon.detach()\n        x = torch.cat([recon, orig], dim=1)\n        res = self.net(x)\n        return recon + res",
+      "is_novel": true,
+      "resembles_standard": "Residual post-processing / Enhancement network."
+    }
+  ],
+  "numerical_concerns": {
+    "precision": "Mixed Precision (AMP) via GradScaler and autocast",
+    "stability_tricks_found": [
+      "Clamping step size in SovereignQuantizer (min=1e-4)",
+      "Clamping likelihoods (min=1e-9) to avoid log(0)",
+      "Using CDF for probability mass calculation in GMM for numerical stability",
+      "Spectral Normalization in Discriminator",
+      "Label smoothing (0.9) for real predictions in GAN training",
+      "Skipping batches with NaNs in Stage 3 training"
+    ],
+    "code": "            # Probability mass in the bin [y_hat - step/2, y_hat + step/2]\n            # using CDF for numerical stability\n            step = y_step.unsqueeze(2)\n            lower = dist.cdf(y_hat_expanded - step / 2)\n            upper = dist.cdf(y_hat_expanded + step / 2)\n            p_y = (upper - lower) * weights"
+  },
+  "dependencies_and_framework": {
+    "framework": "PyTorch",
+    "key_dependencies": [
+      "torch",
+      "torchvision",
+      "numpy",
+      "pillow",
+      "scipy",
+      "math"
+    ],
+    "custom_kernels": []
+  },
+  "theoretical_gaps_or_questions": [
+    "The use of the original image as conditioning for the Residual Refinement Network during training creates a training-inference mismatch, as the original image is not available during inference (where it is replaced by a detached reconstruction).",
+    "The QVS Unitary Coupling layer, while mathematically sound as an orthogonal transformation, its specific benefit in the hyperprior space compared to standard convolutions could be further quantified."
+  ],
+  "summary": {
+    "total_parameters": "Estimated ~20-30M (based on 128/192 channels and Swin blocks)",
+    "architecture_family": "Learned Image Codec (Hyperprior-based) with Swin Transformers",
+    "notable_features": [
+      "Mean-Scale Hyperprior with GMM entropy model",
+      "Swin Transformer blocks for long-range spatial dependencies",
+      "QVS Unitary Coupling (Cayley parametrization)",
+      "Multi-stage training (Foundation -> Refinement -> Adversarial)",
+      "Residual Refinement Network for high-fidelity reconstruction",
+      "SovereignQuantizer with learned per-channel step sizes"
+    ]
+  }
+}
