@@ -85,17 +85,20 @@ class Hyperprior(nn.Module):
     def _init_weights(self):
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='gelu')
+                # FIX 9: Explicit weight init (GELU -> RELU for gain calc)
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
             elif isinstance(m, nn.GroupNorm):
                 nn.init.ones_(m.weight)
                 nn.init.zeros_(m.bias)
     
-    def forward(self, y, force_hard=False):
+    def forward(self, y, hard_prob=None):
         """
         y: (B, latent_dim, H/16, W/16) — receives y_hat for honesty.
         """
+        if hard_prob is None:
+            hard_prob = not self.training
         # Hyper-analysis
         z = self.ha_net(y)
         
@@ -103,7 +106,7 @@ class Hyperprior(nn.Module):
         z_mod_continuous = self.qvs(z)
         
         # Quantize hyper-latent
-        z_hat, z_step = self.z_quantizer(z_mod_continuous, force_hard=force_hard)
+        z_hat, z_step = self.z_quantizer(z_mod_continuous, hard_prob=hard_prob)
         
         # Hyper-synthesis
         hs_features = self.hs_net(z_hat)

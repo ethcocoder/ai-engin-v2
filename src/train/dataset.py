@@ -93,12 +93,12 @@ def get_dataloader(data_dir=None, batch_size=8, image_size=256, is_train=True):
         
     dataset = ImageFolderDataset(data_dir, transform=transform)
     
-    # num_workers set to 4 for faster data loading in Colab/Linux
+    # num_workers set to 2 for Colab's CPU environment to prevent freezes
     dataloader = DataLoader(
         dataset, 
         batch_size=batch_size, 
         shuffle=is_train, 
-        num_workers=4, 
+        num_workers=2, 
         drop_last=True,
         pin_memory=True # Speed boost for CUDA
     )
