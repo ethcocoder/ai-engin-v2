@@ -5,7 +5,13 @@ from torchvision.utils import save_image
 from PIL import Image
 import time
 import os
+import sys
 import argparse
+
+# FIX: Add project root to path for robust imports
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
 from src.model.aether_codec import AetherCodec
 from src.utils.entropy_coder import ParadoxEntropyCoder
