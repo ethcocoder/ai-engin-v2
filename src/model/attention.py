@@ -42,19 +42,15 @@ class WindowAttention(nn.Module):
         
         self.register_buffer("relative_position_index", relative_position_index)
         
-        # FIX 2: Attention mask for shifted windows
-        if shift_size > 0:
-            self.register_buffer("attn_mask", self._create_shifted_mask(window_size, shift_size))
-        else:
-            self.attn_mask = None
+        # Dynamic mask will be created in forward
+        self.attn_mask = None
         
         nn.init.trunc_normal_(self.relative_position_bias_table, std=0.02)
         self.attention_weights = None
     
-    def _create_shifted_mask(self, window_size, shift_size):
+    def _create_shifted_mask(self, H, W, window_size, shift_size):
         """Cyclic shift masking to prevent wrap-around attention artifacts."""
-        img_size = window_size * 2
-        img_mask = torch.zeros((1, 1, img_size, img_size))
+        img_mask = torch.zeros((1, 1, H, W))
         
         h_slices = (slice(0, -window_size),
                    slice(-window_size, -shift_size),
@@ -69,8 +65,8 @@ class WindowAttention(nn.Module):
                 img_mask[:, :, h, w] = cnt
                 cnt += 1
         
-        mask_windows = img_mask.view(1, img_size // window_size, window_size,
-                                      img_size // window_size, window_size)
+        mask_windows = img_mask.view(1, H // window_size, window_size,
+                                      W // window_size, window_size)
         mask_windows = mask_windows.permute(0, 1, 3, 2, 4).contiguous()
         mask_windows = mask_windows.view(-1, window_size * window_size)
         
@@ -119,11 +115,15 @@ class WindowAttention(nn.Module):
         relative_position_bias = relative_position_bias.permute(2, 0, 1).contiguous()
         attn = attn + relative_position_bias.unsqueeze(0)
         
-        # FIX 2: Apply shifted window mask
-        if self.shift_size > 0 and self.attn_mask is not None:
-            nW = attn.shape[0] // B
+        # FIX 2: Dynamic shifted window mask based on H, W
+        if self.shift_size > 0:
+            # Check if cached mask is still valid for current resolution
+            if not hasattr(self, 'cached_mask') or self.cached_mask.shape[0] != (Hp // self.window_size * Wp // self.window_size):
+                self.cached_mask = self._create_shifted_mask(Hp, Wp, self.window_size, self.shift_size).to(x.device)
+            
+            nW = (Hp // self.window_size) * (Wp // self.window_size)
             attn = attn.view(B, nW, self.num_heads, self.window_size**2, self.window_size**2)
-            attn = attn + self.attn_mask.unsqueeze(1).unsqueeze(0)
+            attn = attn + self.cached_mask.unsqueeze(1).unsqueeze(0)
             attn = attn.view(-1, self.num_heads, self.window_size**2, self.window_size**2)
         
         attn = attn.softmax(dim=-1)
