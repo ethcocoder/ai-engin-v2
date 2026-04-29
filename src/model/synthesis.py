@@ -159,7 +159,8 @@ class SynthesisTransform(nn.Module):
         )
         
         self.rrn = ResidualRefinementNetwork(
-            in_channels=out_channels, feature_channels=hidden_channels[-1]
+            in_channels=out_channels, feature_channels=hidden_channels[-1],
+            hidden=64 # Reduced from 128 to prevent OOM at 512x512
         )
     
     def forward(self, y_hat, encoder_skips=None):
