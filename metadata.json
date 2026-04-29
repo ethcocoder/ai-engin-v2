@@ -1,0 +1,164 @@
+{
+  "project_name": "AetherCodec-Elite",
+  "model_type": "custom",
+  "files_scanned": [
+    "src/model/aether_codec.py",
+    "src/model/analysis.py",
+    "src/model/synthesis.py",
+    "src/model/hyperprior.py",
+    "src/model/quantizer.py",
+    "src/model/qvs_flow.py",
+    "src/model/attention.py",
+    "src/model/discriminator.py",
+    "src/loss/rate_distortion.py",
+    "src/loss/perceptual.py",
+    "src/loss/adversarial.py",
+    "src/train/stage2.py"
+  ],
+  "core_math": {
+    "forward_pass": {
+      "description": "Learned image compression via a Variational Autoencoder (VAE) architecture with a Mean-Scale Hyperprior and Gaussian Mixture entropy model. The process follows: y = E(x), y_hat = Q(y), x_hat = D(y_hat), where E is the Analysis Transform and D is the Synthesis Transform.",
+      "source_file": "src/model/aether_codec.py",
+      "code": "def forward(self, x, hard_prob=None):\n    # 1. Encode\n    y, _ = self.encoder(x, return_skips=False)\n    # 2. Quantize main latent\n    y_hat, y_step = self.y_quantizer(y, hard_prob=hard_prob)\n    # 3. Hyperprior (operates on QUANTIZED y_hat)\n    z_hat, z_step, hs_features = self.hyperprior(y_hat, hard_prob=hard_prob)\n    # Context model & GMM parameters\n    ctx_features = self.hyperprior.context_conv(y_hat)\n    weights, means, scales = self.hyperprior.get_gmm_params(hs_features, ctx_features)\n    # 4. Decode\n    x_hat = self.decoder(y_hat, encoder_skips=None)\n    return x_hat, likelihoods, metrics",
+      "input_shapes": {
+        "x": "(B, 3, H, W)"
+      },
+      "output_shapes": {
+        "x_hat": "(B, 3, H, W)",
+        "y_hat": "(B, 192, H/16, W/16)",
+        "z_hat": "(B, 128, H/64, W/64)"
+      }
+    },
+    "loss_function": {
+      "description": "Multi-component Rate-Distortion (RD) objective: L = lambda * (L1 + (1 - MS-SSIM) + LPIPS) + Rate(y) + Rate(z) + lambda * (Entanglement + Sparsity).",
+      "source_file": "src/loss/rate_distortion.py",
+      "code": "def forward(self, x, x_hat, likelihoods, y=None):\n    bpp_loss = sum(-torch.log2(torch.clamp(l, min=1e-10)).sum() / num_pixels for l in likelihoods.values())\n    d_loss = self.l1_loss(x, x_hat)\n    if self.use_ms_ssim:\n        d_loss += 0.5 * (1.0 - ms_ssim(self._normalize_for_ssim(x), self._normalize_for_ssim(x_hat), data_range=1.0))\n    if self.use_lpips:\n        d_loss += effective_weight * self.lpips_loss(x, x_hat)\n    total_loss = self.lmbda * d_loss + bpp_loss + self.lmbda * reg_loss",
+      "mathematical_properties": "Differentiable proxy for non-differentiable rate-distortion optimization; uses Straight-Through Estimation (STE) for quantization gradients."
+    },
+    "optimization": {
+      "algorithm": "AdamW",
+      "source_file": "src/train/stage2.py",
+      "code": "optimizer = AdamW(params_to_train, lr=1e-4, betas=(0.9, 0.999), weight_decay=1e-4)\nscheduler = torch.optim.lr_scheduler.OneCycleLR(\n    optimizer, max_lr=1e-4, \n    steps_per_epoch=len(dataloader), \n    epochs=epochs,\n    pct_start=0.3,\n    div_factor=10,\n    final_div_factor=100\n)",
+      "learning_rate_schedule": "OneCycleLR (Cosine annealing with warmup)",
+      "gradient_clipping": true,
+      "weight_decay": "1e-4"
+    }
+  },
+  "attention_mechanism": {
+    "type": "custom",
+    "complexity": "O(n^2) local window attention",
+    "source_file": "src/model/attention.py",
+    "code": "class WindowAttention(nn.Module):\n    def forward(self, x):\n        # Cyclic Shift\n        if self.shift_size > 0:\n            x = torch.roll(x, shifts=(-self.shift_size, -self.shift_size), dims=(2, 3))\n        # Attention Calculation\n        attn = (q @ k.transpose(-2, -1)) * self.scale\n        # Add relative position bias\n        attn = attn + relative_position_bias.unsqueeze(0)\n        attn = attn.softmax(dim=-1)\n        out = (attn @ v)\n        return out",
+    "custom_modifications": "Swin-style window attention with relative position bias and dynamic cyclic shift masking for image reconstruction."
+  },
+  "normalization": {
+    "type": "custom",
+    "source_files": [
+      "src/model/analysis.py",
+      "src/model/attention.py",
+      "src/model/discriminator.py"
+    ],
+    "code": "class ChannelLayerNorm(nn.Module):\n    def forward(self, x):\n        x = x.permute(0, 2, 3, 1) # (B, H, W, C)\n        x = self.norm(x)\n        return x.permute(0, 3, 1, 2) # (B, C, H, W)",
+    "where_applied": "both",
+    "eps_value": "1e-5 (default)"
+  },
+  "activation_functions": {
+    "names": [
+      "GELU",
+      "Sigmoid",
+      "Tanh",
+      "Softplus",
+      "LeakyReLU"
+    ],
+    "source_files": [
+      "src/model/analysis.py",
+      "src/model/synthesis.py",
+      "src/model/hyperprior.py",
+      "src/model/discriminator.py"
+    ],
+    "code_snippets": {
+      "GELU": "self.act = nn.GELU()",
+      "Softplus": "scales = F.softplus(params[:, :, :, 2]) * 0.1 + 1e-6",
+      "Tanh": "self.to_rgb = nn.Sequential(nn.Conv2d(hidden_channels[-1], out_channels, 3, padding=1), nn.Tanh())"
+    }
+  },
+  "positional_encoding": {
+    "type": "sinusoidal",
+    "max_sequence_length": 4096,
+    "source_file": "src/model/analysis.py",
+    "code": "class PositionalEncoding2D(nn.Module):\n    def forward(self, x):\n        return x + self.pe[:, :, :x.size(2), :x.size(3)]"
+  },
+  "embedding_layers": {
+    "vocab_size": null,
+    "hidden_dim": 192,
+    "source_file": "src/model/analysis.py",
+    "code": "self.encoder = AnalysisTransform(in_channels=3, latent_dim=192)"
+  },
+  "custom_components": [
+    {
+      "name": "QVS Unitary Coupling",
+      "purpose": "Channel decorrelation in hyper-latent space while preserving volume (probability-conserving).",
+      "math_description": "W = (I - A)(I + A)^{-1}, where A is skew-symmetric (A = -A^T)",
+      "source_file": "src/model/qvs_flow.py",
+      "code": "def _compute_orthogonal_matrix(self):\n    A = A_clamped - A_clamped.t()\n    I = torch.eye(self.channels, device=A.device, dtype=A.dtype)\n    I_plus_A_inv = torch.linalg.inv(I + A)\n    W = torch.matmul(I - A, I_plus_A_inv)\n    return W",
+      "is_novel": true,
+      "resembles_standard": "Orthogonal 1x1 Convolution / Householder Transform"
+    },
+    {
+      "name": "Sovereign Quantizer",
+      "purpose": "Learned per-channel quantization step sizes with STE gradient estimation.",
+      "math_description": "y_hat = round(y / s) * s during inference; y_hat = y + U(-s/2, s/2) during training.",
+      "source_file": "src/model/quantizer.py",
+      "code": "class STEQuantize(torch.autograd.Function):\n    @staticmethod\n    def forward(ctx, inputs, step_size):\n        outputs = torch.round(inputs / step_size) * step_size\n        return outputs",
+      "is_novel": true,
+      "resembles_standard": "Straight-Through Estimator (STE)"
+    },
+    {
+      "name": "Residual Refinement Network (RRN)",
+      "purpose": "Synthesizing high-frequency details lost during quantization.",
+      "math_description": "x_final = x_recon + sigmoid(gate) * clamp(R(x_recon, f), -0.5, 0.5)",
+      "source_file": "src/model/synthesis.py",
+      "code": "def forward(self, recon, decoder_features):\n    x = torch.cat([recon, decoder_features], dim=1)\n    res = self.refine_blocks(self.initial(x))\n    gate = torch.sigmoid(self.residual_gate)\n    return recon + gate * torch.clamp(self.final(res), -0.5, 0.5)",
+      "is_novel": true,
+      "resembles_standard": "Residual Learning / Image Super-Resolution"
+    }
+  ],
+  "numerical_concerns": {
+    "precision": "mixed",
+    "stability_tricks_found": [
+      "Likelihood clamping (1e-10)",
+      "Softplus for GMM scales",
+      "Skew-symmetric matrix clamping in QVS",
+      "Gradient norm clipping (1.0)",
+      "Anti-aliased BlurPool downsampling"
+    ],
+    "code": "likelihood = torch.clamp(likelihood, min=1e-10)\nscales = F.softplus(params[:, :, :, 2]) * 0.1 + 1e-6\nA_clamped = torch.clamp(self.A_params, -self.max_A_norm, self.max_A_norm)"
+  },
+  "dependencies_and_framework": {
+    "framework": "PyTorch",
+    "key_dependencies": [
+      "torch",
+      "torchvision",
+      "numpy",
+      "lpips",
+      "torchac"
+    ],
+    "custom_kernels": []
+  },
+  "theoretical_gaps_or_questions": [
+    "The use of zlib in the entropy coder simulates but does not achieve optimal arithmetic coding compression efficiency.",
+    "Global context gating in the encoder might lead to training instability if the interpolation size varies significantly.",
+    "The entanglement regularizer uses a custom Rényi-2 entropy calculation which is mathematically non-standard for image compression."
+  ],
+  "summary": {
+    "total_parameters": "inferred ~25M (Analysis: 10M, Synthesis: 12M, Hyperprior: 3M)",
+    "architecture_family": "Learned Image Codec (VAE + GMM Hyperprior + GAN Refinement)",
+    "notable_features": [
+      "Quantum-inspired Unitary Coupling (QVS)",
+      "Learned per-channel step-size quantization",
+      "Anti-aliased BlurPool stages",
+      "Swin-Transformer based latent enhancement",
+      "Multi-scale PatchGAN refinement"
+    ]
+  }
+}
