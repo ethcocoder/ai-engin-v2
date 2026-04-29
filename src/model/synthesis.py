@@ -94,15 +94,22 @@ class ResidualRefinementNetwork(nn.Module):
         )
         
         self.final = nn.Conv2d(hidden, in_channels, 3, padding=1)
-        # FIX 7: Start weak so the decoder body learns first
-        self.residual_gate = nn.Parameter(torch.tensor(-2.0))
+        # ELITE FIX: Feature-dependent adaptive gating
+        self.residual_gate = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Conv2d(feature_channels, 1, 1),
+            nn.Sigmoid()
+        )
 
     def forward(self, recon, decoder_features):
         x = torch.cat([recon, decoder_features], dim=1)
         x = self.initial(x)
         x = self.refine_blocks(x)
         res = self.final(x)
-        gate = torch.sigmoid(self.residual_gate)
+        
+        # Adaptive gate based on decoder features
+        gate = self.residual_gate(decoder_features)
+        
         # Clamp residual to prevent color explosion
         return recon + gate * torch.clamp(res, -0.5, 0.5)
 

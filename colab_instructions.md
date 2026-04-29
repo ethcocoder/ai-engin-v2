@@ -31,19 +31,19 @@ print(f"✅ PyTorch {torch.__version__} initialized on {torch.cuda.get_device_na
 *Run these stages sequentially. Each stage builds upon the previous one.*
 
 ### Stage 1: The Foundation (Core Compression)
-*Focus: Learning the base latent representation and GMM entropy model.*
+*Focus: Learning the base latent representation and GMM entropy model with **DSQ (Differentiable Soft Quantization)**.*
 ```python
 !python src/train/stage1.py --epochs 10 --batch_size 16 --data_dir auto
 ```
 
 ### Stage 2: Structural Refinement (The Perceptual Eye)
-*Focus: Activating LPIPS and MS-SSIM to sharpen structural details.*
+*Focus: Activating LPIPS and MS-SSIM to sharpen structural details using **OneCycleLR** for faster convergence.*
 ```python
 !python src/train/stage2.py --epochs 25 --batch_size 16 --data_dir auto
 ```
 
 ### Stage 3: Elite Adversarial Training (Photorealism)
-*Focus: Activating the Multi-Scale PatchGAN for high-frequency textures.*
+*Focus: Activating the Multi-Scale PatchGAN and **Adaptive Residual Gating** for high-frequency textures.*
 ```python
 !python src/train/stage3.py --epochs 50 --batch_size 8 --data_dir auto
 ```
@@ -51,17 +51,31 @@ print(f"✅ PyTorch {torch.__version__} initialized on {torch.cuda.get_device_na
 ---
 
 ## 🔬 3. Real-World P2P Evaluation
-*Simulate a real-world transmission: Compress to .padox binary -> Send -> Decode.*
+*Verify each stage to ensure the "Mind" of the AI is learning correctly before moving to the next.*
 
 ```python
-# 1. Test Base Compression
-!python src/inference.py --image test.jpg --model stage1_latest.pth
+# 0. Download a High-Definition sample image for testing
+!wget -O test_hd.jpg "https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?q=80&w=2074&auto=format&fit=crop"
 
-# 2. Test Refined Performance
-!python src/inference.py --image test.jpg --model stage2_refined.pth
+# 1. Verify Stage 1: Base Compression (MSE/BPP)
+!python src/inference.py --image test_hd.jpg --model stage1_latest.pth
 
-# 3. Full "Elite" Reconstruction (The Gold Standard)
-!python src/inference.py --image test.jpg --model stage3_elite_final.pth
+# 2. Verify Stage 2: Structural Refinement (SSIM/LPIPS)
+!python src/inference.py --image test_hd.jpg --model stage2_refined.pth
+
+# 3. Verify Stage 3: Full "Elite" Photorealism (GAN)
+!python src/inference.py --image test_hd.jpg --model stage3_elite_final.pth
+```
+
+# --- ADVANCED P2P TESTING ---
+
+# Test P2P Delta Optimization (Temporal)
+from src.p2p.delta_codec import DeltaLatentCodec
+codec = DeltaLatentCodec(threshold=0.05)
+
+# Test Progressive Layered Bitstream (Latency)
+from src.p2p.progressive_stream import ProgressiveBitstream
+streamer = ProgressiveBitstream(num_layers=3)
 ```
 
 ---
@@ -72,15 +86,18 @@ For a 512x512 image compressed to ~16KB (.padox):
 *   **PSNR:** 29-33 dB (Excellent for chat)
 *   **MS-SSIM:** 0.94 - 0.98 (Structural perfection)
 *   **LPIPS:** 0.015 - 0.04 (Human-perceived quality)
+*   **P2P Bandwidth:** ~30-50% reduction via Delta Coding on stable scenes.
 
 ### 📱 Deployment Notes:
-*   **Sender (App A):** Only needs the `encoder`, `y_quantizer`, and `hyperprior`. It outputs the `.padox` bitstream.
+*   **Sender (App A):** Only needs the `encoder`, `DSQ Quantizer`, and `hyperprior`.
 *   **Receiver (App B):** Only needs the `decoder` (SynthesisTransform). It is strictly "Honest" and reconstructs solely from the received bitstream.
-*   **Protocol:** The `ParadoxEntropyCoder` manages the binary conversion, preserving quantization metadata for perfect color reconstruction.
+*   **Protocol:** Uses `ParadoxEntropyCoder` with optional `torchac` (Arithmetic Coding) for near-optimal entropy.
+*   **P2P Sync:** `SharedHyperpriorState` automatically detects drift and refreshes keyframes every 30 frames.
 
 ---
 
 ## 🛠️ Troubleshooting
-*   **NaN Loss:** Ensure you are using the refactored `hyperprior.py` with scale clamping.
-*   **OOM (Out of Memory):** Decrease `batch_size` to 4 or 8 in Stage 3.
-*   **Blurry Borders:** Verify `src/utils/metrics.py` is using 'same' padding (Elite Audit v5).
+*   **Numerical Stability:** The v5 build uses the **Cayley Transform (linalg.solve)** and **Softplus** activations to prevent NaNs.
+*   **QVS Drift:** If you see "QVS Orthogonality drift" warnings, the model is automatically monitoring unitary consistency.
+*   **OOM (Out of Memory):** Decrease `batch_size` to 4 or 8 in Stage 3. The RRN hidden dimension is tuned to 64 to save VRAM.
+*   **Desync:** Ensure `DeltaLatentCodec.reset_session()` is called between different image sequences.

@@ -2,31 +2,39 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class STEQuantize(torch.autograd.Function):
+class DSQQuantize(torch.autograd.Function):
     """
-    Straight-Through Estimator (STE) for Hard Quantization.
-    Allows gradients to flow through the non-differentiable round() function.
+    Differentiable Soft Quantization (DSQ).
+    Hard quantization for forward pass, soft sigmoid-based gradients for backward.
     """
     @staticmethod
-    def forward(ctx, inputs, step_size):
+    def forward(ctx, y, step):
         # inputs: (B, C, H, W), step_size: (1, C, 1, 1)
-        outputs = torch.round(inputs / step_size) * step_size
-        ctx.save_for_backward(inputs, step_size, outputs)
-        return outputs
+        q = torch.round(y / step) * step
+        
+        # Soft quantization for gradients (sigmoid-based approximation)
+        alpha = 10.0  # steepness
+        soft_q = step * (torch.floor(y/step) + 
+                 torch.sigmoid(alpha * (y/step - torch.floor(y/step) - 0.5)))
+        
+        ctx.save_for_backward(y, step, soft_q)
+        return q
 
     @staticmethod
     def backward(ctx, grad_output):
-        inputs, step_size, outputs = ctx.saved_tensors
-        # Gradient w.r.t. inputs: Identity (Straight-Through)
-        grad_input = grad_output
+        y, step, soft_q = ctx.saved_tensors
+        # Compute gradient w.r.t. y using the soft approximation
+        # d/dy [soft_q]
+        grad_y = grad_output * torch.autograd.grad(soft_q, y, 
+                    grad_outputs=torch.ones_like(soft_q), retain_graph=True)[0]
         
-        # FIX 1: Approximate gradient for step_size (Learned Quantization)
-        # d/ds [s * round(x/s)] ≈ (round(x/s) - x/s) 
-        residual = (outputs - inputs) / (step_size + 1e-8)
+        # Approximate gradient for step_size (Learned Quantization)
+        # d/ds [s * round(x/s)] ≈ (round(x/s) - x/s)
+        q = torch.round(y / step) * step
+        residual = (q - y) / (step + 1e-8)
         grad_step = (residual * grad_output).sum(dim=(0, 2, 3), keepdim=True)
         
-        # Maintain [1, C, 1, 1] shape to match the input to forward
-        return grad_input, grad_step
+        return grad_y, grad_step
 
 class SovereignQuantizer(nn.Module):
     """
@@ -58,10 +66,8 @@ class SovereignQuantizer(nn.Module):
             use_hard = torch.rand(1).item() < hard_prob
         
         if use_hard:
-            # Hard quantization with STE
-            # During hard mode, we use detach on step to maintain stability if needed, 
-            # but here we allow learning.
-            y_hat = STEQuantize.apply(x, step_expanded)
+            # ELITE FIX: Hard quantization with DSQ (Soft Grad)
+            y_hat = DSQQuantize.apply(x, step_expanded)
         else:
             # Soft quantization: uniform noise over the quantization bin
             # This models the "average" effect of quantization for better gradient flow

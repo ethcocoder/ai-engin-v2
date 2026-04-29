@@ -59,9 +59,9 @@ class RateDistortionLoss(nn.Module):
         # 1. Rate (Bits Per Pixel)
         bpp_loss = 0.0
         for likelihood in likelihoods.values():
-            # FIX 5: Clamp likelihood to prevent -log2(0) explosions
-            likelihood = torch.clamp(likelihood, min=1e-10)
-            bpp = -torch.log2(likelihood).sum() / num_pixels
+            # ELITE FIX: Numerically stable rate computation (-log2(p) = -ln(p)/ln(2))
+            # No explicit clamping; epsilon inside log for stability.
+            bpp = -torch.log(likelihood + 1e-10).sum() / (num_pixels * math.log(2))
             # FIX 5: Cap max bpp per component for stability
             bpp = torch.clamp(bpp, max=self.max_bpp)
             bpp_loss += bpp

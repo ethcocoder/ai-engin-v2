@@ -31,12 +31,11 @@ class QVSUnitaryCoupling(nn.Module):
         I = torch.eye(self.channels, device=A.device, dtype=A.dtype)
         
         # Stability check: Ensure I + A is well-conditioned
-        I_plus_A = I + A
-        # Numerical error guard: If matrix is nearly singular, regularize it
-        # Note: In theory I+A is always invertible for skew-symmetric A
+        # Regularize to prevent singularity (I + A + epsilon * I)
+        I_plus_A = I + A + 1e-6 * I
         
-        I_plus_A_inv = torch.linalg.inv(I_plus_A)
-        W = torch.matmul(I - A, I_plus_A_inv)
+        # FIX: Solve (I+A)^T @ W^T = (I-A)^T  →  W = (I-A) @ (I+A)^{-1}
+        W = torch.linalg.solve(I_plus_A.T, (I - A).T).T
         
         return W
     
@@ -63,6 +62,15 @@ class QVSUnitaryCoupling(nn.Module):
         Apply 1x1 Unitary Convolution.
         """
         W = self.get_orthogonal_matrix()
+        
+        # ELITE DEBUG: Verify orthogonality drift during training (1% frequency)
+        if self.training and torch.rand(1).item() < 0.01:
+            with torch.no_grad():
+                I = torch.eye(self.channels, device=W.device)
+                ortho_error = torch.norm(W @ W.t() - I)
+                if ortho_error > 1e-4:
+                    print(f"⚠️ Warning: QVS Orthogonality drift detected: {ortho_error.item():.2e}")
+        
         # FIX 6: Match input dtype (fp32, fp16, bf16)
         W = W.to(x.dtype)
         W = W.view(self.channels, self.channels, 1, 1)
