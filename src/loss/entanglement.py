@@ -1,35 +1,55 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+import warnings
 
 class EntanglementRegularizer(nn.Module):
     """
-    Elite Differentiable Channel Regularizer.
-    Uses soft histogram entropy (RBF kernel) to maximize channel independence.
+    Differentiable entropy regularization via RBF soft histogram.
+    Replaces deprecated Rényi-2 entropy with stable Shannon entropy.
     """
-    def __init__(self, num_bins=256, temperature=0.5, weight=0.01):
+    
+    def __init__(self, weight=0.01, num_bins=256, temperature=0.5, **kwargs):
         super().__init__()
         self.weight = weight
+        self.num_bins = num_bins
         self.temperature = temperature
+        
+        # Non-trainable histogram bins
         self.register_buffer('bins', torch.linspace(-10, 10, num_bins))
+        
+        # Backward compatibility: warn about deprecated args
+        if kwargs:
+            warnings.warn(
+                f"EntanglementRegularizer: deprecated arguments ignored: {list(kwargs.keys())}. "
+                f"RBF soft histogram is now always used.", 
+                DeprecationWarning, 
+                stacklevel=2
+            )
     
     def forward(self, y_hat):
-        # 1. Flatten to (N, 1)
+        """
+        Args:
+            y_hat: Latent tensor (B, C, H, W)
+        Returns:
+            Scalar loss: negative entropy (minimize = maximize entropy)
+        """
+        # Flatten to (N, 1)
         y_flat = y_hat.float().reshape(-1, 1)
         bins = self.bins.view(1, -1)
         
-        # 2. Soft histogram via RBF kernel (fully differentiable)
-        # Compute distances: -((y_flat - bins) ** 2) / (2 * temperature ** 2)
+        # RBF kernel for soft histogram
         distances = -((y_flat - bins) ** 2) / (2 * self.temperature ** 2)
-        weights = torch.softmax(distances, dim=1)  # Soft assignment to bins
+        weights = F.softmax(distances, dim=1)
         
-        # 3. Normalize to probability distribution
+        # Build probability distribution
         hist = weights.mean(dim=0)
         hist = hist / (hist.sum() + 1e-10)
         
-        # 4. Shannon entropy (maximize = minimize redundancy)
+        # Shannon entropy
         entropy = -(hist * torch.log(hist + 1e-10)).sum()
         
-        # Penalize low entropy (peaked distributions = inefficient coding)
+        # Return negative entropy as loss (we want to maximize entropy)
         return -entropy * self.weight
 
 class SparsityRegularizer(nn.Module):
