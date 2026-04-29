@@ -34,7 +34,7 @@ class AetherCodec(nn.Module):
             self.hyperprior = Hyperprior(
                 latent_dim=192, 
                 hyper_dim=128, 
-                num_components=3
+                num_components=8
             )
 
     def forward(self, x, hard_prob=None):

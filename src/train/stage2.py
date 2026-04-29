@@ -29,18 +29,26 @@ def train_stage2(model, dataloader, epochs=100, device='cuda', ema=None):
     
     # Train only main codec parameters (encoder, decoder, quantizer)
     params_to_train = [p for n, p in model.named_parameters() if p.requires_grad]
+    # ELITE ACCURACY: OneCycleLR for faster convergence
     optimizer = AdamW(params_to_train, lr=1e-4, betas=(0.9, 0.999), weight_decay=1e-4)
-    scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=50, T_mult=2)
+    scheduler = torch.optim.lr_scheduler.OneCycleLR(
+        optimizer, max_lr=1e-4, 
+        steps_per_epoch=len(dataloader), 
+        epochs=epochs,
+        pct_start=0.3,
+        div_factor=10,
+        final_div_factor=100
+    )
     scaler = GradScaler('cuda')
     
     if ema is None:
         ema = EMA(model, decay=0.999)
         
-    print("Starting Stage 2 Training...")
+    print(f"Starting Stage 2 Training for {epochs} epochs...")
     
     for epoch in range(epochs):
-        # FIX 8: Freeze RRN for first 20 epochs
-        if epoch < 20:
+        # FIX 8: Freeze RRN for first 10 epochs (reduced from 20)
+        if epoch < 10:
             for p in model.decoder.rrn.parameters():
                 p.requires_grad = False
         else:
@@ -57,8 +65,8 @@ def train_stage2(model, dataloader, epochs=100, device='cuda', ema=None):
             
             optimizer.zero_grad()
             
-            # FIX 5: Quantization Curriculum
-            hard_prob = min(1.0, max(0.0, (epoch - epochs*0.3) / (epochs*0.4 + 1e-6)))
+            # FIX 5: Quantization Curriculum (mostly hard in Stage 2)
+            hard_prob = min(1.0, max(0.5, (epoch + 10) / (epochs + 10)))
             
             with autocast('cuda'):
                 x_hat, likelihoods, metrics = model(x, hard_prob=hard_prob)
@@ -73,6 +81,9 @@ def train_stage2(model, dataloader, epochs=100, device='cuda', ema=None):
             scaler.step(optimizer)
             scaler.update()
             
+            # OneCycle scheduler step per batch
+            scheduler.step()
+            
             # FIX 1: Invalidate QVS cache after weight update
             invalidate_qvs_cache(model)
             
@@ -84,10 +95,10 @@ def train_stage2(model, dataloader, epochs=100, device='cuda', ema=None):
                 pbar.set_postfix({
                     "loss": f"{loss.item():.4f}",
                     "bpp": f"{loss_dict['bpp_loss']:.4f}",
-                    "ms-ssim": f"{loss_dict['d_loss']:.4f}"
+                    "ms-ssim": f"{loss_dict['d_loss']:.4f}",
+                    "lr": f"{optimizer.param_groups[0]['lr']:.2e}"
                 })
                 
-        scheduler.step()
         print(f"Epoch {epoch+1} Completed. Avg Loss: {epoch_loss/len(dataloader):.4f}")
 
         # --- Checkpoint Saving ---

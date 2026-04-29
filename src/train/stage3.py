@@ -36,11 +36,15 @@ def train_stage3(model, dataloader, epochs=50, device='cuda', ema=None):
     criterion = RateDistortionLoss(lmbda=0.1, use_ms_ssim=True, use_lpips=True, use_entanglement=True).to(device)
     adv_criterion = AdversarialLoss(lambda_fm=10.0).to(device)
     
-    opt_G = AdamW(model.parameters(), lr=2e-5, betas=(0.5, 0.9), weight_decay=1e-4)
-    opt_D = AdamW(discriminator.parameters(), lr=2e-5, betas=(0.5, 0.9), weight_decay=1e-4)
+    opt_G = AdamW(model.parameters(), lr=1e-4, betas=(0.5, 0.9), weight_decay=1e-4)
+    opt_D = AdamW(discriminator.parameters(), lr=1e-4, betas=(0.5, 0.9), weight_decay=1e-4)
     
-    scheduler_G = CosineAnnealingWarmRestarts(opt_G, T_0=50, T_mult=2)
-    scheduler_D = CosineAnnealingWarmRestarts(opt_D, T_0=50, T_mult=2)
+    scheduler_G = torch.optim.lr_scheduler.OneCycleLR(
+        opt_G, max_lr=1e-4, steps_per_epoch=len(dataloader), epochs=epochs
+    )
+    scheduler_D = torch.optim.lr_scheduler.OneCycleLR(
+        opt_D, max_lr=1e-4, steps_per_epoch=len(dataloader), epochs=epochs
+    )
     
     scaler_G = GradScaler('cuda')
     scaler_D = GradScaler('cuda')
@@ -48,7 +52,7 @@ def train_stage3(model, dataloader, epochs=50, device='cuda', ema=None):
     if ema is None:
         ema = EMA(model, decay=0.999)
         
-    print("Starting Stage 3 Elite Training (GAN Mode)...")
+    print(f"Starting Stage 3 Elite Training for {epochs} epochs (GAN Mode)...")
     
     for epoch in range(epochs):
         # FIX: Synchronize loss engine with current epoch for warmups
@@ -66,8 +70,8 @@ def train_stage3(model, dataloader, epochs=50, device='cuda', ema=None):
         for batch_idx, data in enumerate(pbar):
             x = data[0].to(device) if isinstance(data, (list, tuple)) else data.to(device)
             
-            # FIX 5: Quantization Curriculum (mostly hard in Stage 3)
-            hard_prob = min(1.0, max(0.8, epoch / (epochs*0.2 + 1e-6)))
+            # FIX 5: Quantization Curriculum (Hard by default in Stage 3)
+            hard_prob = 1.0 
             
             # --- Generate Fake Images ---
             with autocast('cuda'):
@@ -88,9 +92,6 @@ def train_stage3(model, dataloader, epochs=50, device='cuda', ema=None):
             scaler_D.step(opt_D)
             scaler_D.update()
             
-            # FIX 1: Invalidate QVS cache after D update
-            invalidate_qvs_cache(model)
-            
             # --- Train Generator (Codec) ---
             opt_G.zero_grad()
             with autocast('cuda'):
@@ -107,7 +108,7 @@ def train_stage3(model, dataloader, epochs=50, device='cuda', ema=None):
                 rd_loss_dict = criterion(x, x_hat, likelihoods, y=metrics_base.get('y_clean'))
                 
                 # Final loss combination
-                total_g_loss = rd_loss_dict['loss'] + g_adv_total
+                total_g_loss = rd_loss_dict['loss'] + g_adv_total * 0.1 # Reduced Adv weight for stability
 
             scaler_G.scale(total_g_loss).backward()
             scaler_G.unscale_(opt_G)
@@ -115,7 +116,11 @@ def train_stage3(model, dataloader, epochs=50, device='cuda', ema=None):
             scaler_G.step(opt_G)
             scaler_G.update()
             
-            # FIX 1: Invalidate QVS cache after G update
+            # Schedulers step per batch
+            scheduler_G.step()
+            scheduler_D.step()
+            
+            # FIX 1: Invalidate QVS cache after updates
             invalidate_qvs_cache(model)
             
             ema.update(model)
@@ -124,12 +129,9 @@ def train_stage3(model, dataloader, epochs=50, device='cuda', ema=None):
                 pbar.set_postfix({
                     "G": f"{total_g_loss.item():.3f}",
                     "D": f"{d_loss.item():.3f}",
-                    "Conf": f"R:{adv_metrics['d_real_conf']:.2f} F:{adv_metrics['d_fake_conf']:.2f}",
-                    "bpp": f"{rd_loss_dict['bpp_loss']:.3f}"
+                    "bpp": f"{rd_loss_dict['bpp_loss']:.3f}",
+                    "lr": f"{opt_G.param_groups[0]['lr']:.2e}"
                 })
-                
-        scheduler_G.step()
-        scheduler_D.step()
         
         # Save Checkpoints
         checkpoint = {

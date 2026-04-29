@@ -32,7 +32,7 @@ class Hyperprior(nn.Module):
     Implements anti-aliased analysis, depthwise-separable parameters, 
     and stabilized GMM prediction.
     """
-    def __init__(self, latent_dim=192, hyper_dim=128, num_components=3):
+    def __init__(self, latent_dim=192, hyper_dim=128, num_components=8):
         super().__init__()
         self.latent_dim = latent_dim
         self.hyper_dim = hyper_dim
@@ -128,9 +128,9 @@ class Hyperprior(nn.Module):
         weights = params[:, :, :, 0]
         means = params[:, :, :, 1]
         
-        # FIX 4: Tighter clamps and epsilon for GMM stability
-        # Adding 1e-6 ensures the scale is NEVER zero even if exp() underflows.
-        scales = torch.exp(torch.clamp(params[:, :, :, 2], -5, 5)) + 1e-6
+        # ELITE ACCURACY FIX: Softplus for scale activation
+        # Softplus is more stable than exp and prevents gradient explosions (NaNs)
+        scales = F.softplus(params[:, :, :, 2]) * 0.1 + 1e-6
         
         # FIX 5: Soft GMM temperature (1.0) for Lockdown Build stability
         temperature = 1.0

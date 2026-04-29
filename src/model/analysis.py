@@ -99,6 +99,16 @@ class AnalysisTransform(nn.Module):
             ResidualBlock(latent_dim, latent_dim, drop_path_rate=0.1)
         )
         
+        # ELITE ACCURACY: Global Context Path
+        # Captures image-wide statistics to inform the local latents
+        self.global_context = nn.Sequential(
+            nn.AdaptiveAvgPool2d(8),
+            nn.Conv2d(latent_dim, latent_dim, 1),
+            nn.GELU(),
+            nn.Conv2d(latent_dim, latent_dim, 1),
+            nn.Sigmoid()
+        )
+        
         # FIX 8: Positional encoding
         self.pos_enc = PositionalEncoding2D(latent_dim)
         
@@ -136,6 +146,12 @@ class AnalysisTransform(nn.Module):
         x = self.stage3(x); skips.append(x)  # H/8, 256ch
         
         x = self.stage4(x)
+        
+        # ELITE ACCURACY: Apply Global Context Gating
+        g_context = self.global_context(x)
+        g_context = F.interpolate(g_context, size=x.shape[-2:], mode='bilinear')
+        x = x * g_context
+        
         # FIX 3: Swin output not in skips fix: add H/16 skip before attention
         skips.append(x)  # H/16, 192ch
         
