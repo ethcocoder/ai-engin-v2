@@ -17,7 +17,7 @@ class RateDistortionLoss(nn.Module):
     def __init__(self, lmbda=0.01, use_ms_ssim=False, use_lpips=False, 
                  use_entanglement=False, entanglement_weight=0.01,
                  lpips_weight=0.1, lpips_warmup_epochs=10,
-                 max_bpp=10.0):
+                 max_bpp=2.0, total_epochs=40, rate_warmup_pct=0.3):
         super().__init__()
         self.lmbda = lmbda
         self.use_ms_ssim = use_ms_ssim
@@ -27,6 +27,8 @@ class RateDistortionLoss(nn.Module):
         self.lpips_warmup_epochs = lpips_warmup_epochs
         self.max_bpp = max_bpp
         self.current_epoch = 0
+        self.total_epochs = total_epochs
+        self.rate_warmup_pct = rate_warmup_pct
         
         self.l1_loss = nn.L1Loss()
         
@@ -55,6 +57,15 @@ class RateDistortionLoss(nn.Module):
         """
         N, _, H, W = x.shape
         num_pixels = N * H * W
+        
+        # FIX 7: Rate warmup — let the encoder/decoder learn to reconstruct
+        # before the entropy model starts pulling the latent distribution.
+        # Scale rate weight from 0.01 → 1.0 over the first 30% of training.
+        warmup_end = max(1, int(self.total_epochs * self.rate_warmup_pct))
+        if self.current_epoch < warmup_end:
+            rate_weight = 0.01 + 0.99 * (self.current_epoch / warmup_end)
+        else:
+            rate_weight = 1.0
         
         # 1. Rate (Bits Per Pixel)
         bpp_loss = 0.0
@@ -99,7 +110,8 @@ class RateDistortionLoss(nn.Module):
             reg_loss = ent_val + spa_val
             
         # FIX 4: Scale distortion and regularization by lambda to maintain priority balance
-        total_loss = self.lmbda * d_loss + bpp_loss + self.lmbda * reg_loss
+        # FIX 7: Apply rate_weight to prevent bpp from dominating early training
+        total_loss = self.lmbda * d_loss + rate_weight * bpp_loss + self.lmbda * reg_loss
         
         # FIX 6: Comprehensive Metrics Return
         return {
