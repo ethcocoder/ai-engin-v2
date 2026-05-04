@@ -26,7 +26,7 @@ def train_stage1(model, dataloader, epochs=100, device='cuda'):
     for p in model.decoder.rrn.parameters():
         p.requires_grad = False
         
-    criterion = RateDistortionLoss(lmbda=0.01, use_ms_ssim=False, use_lpips=False, use_entanglement=True).to(device)
+    criterion = RateDistortionLoss(lmbda=0.01, use_ms_ssim=False, use_lpips=False, use_entanglement=True, total_epochs=epochs).to(device)
     # ELITE ACCURACY: OneCycleLR for faster convergence and better optima
     # Peak at 1e-4, then settle at 1e-6
     optimizer = AdamW(model.parameters(), lr=1e-4, betas=(0.9, 0.999), weight_decay=1e-4)
@@ -90,10 +90,14 @@ def train_stage1(model, dataloader, epochs=100, device='cuda'):
             epoch_loss += loss.item()
             
             if batch_idx % 10 == 0:
+                # Show rate_weight so user can verify warmup progress
+                warmup_end = max(1, int(epochs * 0.3))
+                rw = min(1.0, 0.01 + 0.99 * (epoch / warmup_end)) if epoch < warmup_end else 1.0
                 pbar.set_postfix({
                     "loss": f"{loss.item():.4f}",
                     "bpp": f"{loss_dict['bpp_loss']:.4f}",
                     "mse": f"{loss_dict['d_loss']:.4f}",
+                    "rw": f"{rw:.2f}",
                     "lr": f"{optimizer.param_groups[0]['lr']:.2e}"
                 })
                 
