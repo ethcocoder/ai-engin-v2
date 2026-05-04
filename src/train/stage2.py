@@ -8,8 +8,10 @@ from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
 from torch.amp import GradScaler, autocast
 import torch.nn as nn
 from tqdm import tqdm
+import warnings
 
 from src.loss.rate_distortion import RateDistortionLoss
+from src.model.qvs_flow import invalidate_qvs_cache
 from src.utils.ema import EMA
 
 def train_stage2(model, dataloader, epochs=100, device='cuda', ema=None):
@@ -25,7 +27,7 @@ def train_stage2(model, dataloader, epochs=100, device='cuda', ema=None):
         for param in model.hyperprior.parameters():
             param.requires_grad = False
             
-    criterion = RateDistortionLoss(lmbda=0.01, use_ms_ssim=True, use_lpips=True, use_entanglement=True).to(device)
+    criterion = RateDistortionLoss(lmbda=0.05, use_ms_ssim=True, use_lpips=True, use_entanglement=True, total_epochs=epochs, lpips_warmup_epochs=5).to(device)
     
     # Train only main codec parameters (encoder, decoder, quantizer)
     params_to_train = [p for n, p in model.named_parameters() if p.requires_grad]
@@ -47,8 +49,8 @@ def train_stage2(model, dataloader, epochs=100, device='cuda', ema=None):
     print(f"Starting Stage 2 Training for {epochs} epochs...")
     
     for epoch in range(epochs):
-        # FIX 8: Freeze RRN for first 10 epochs (reduced from 20)
-        if epoch < 10:
+        # FIX 8: Freeze RRN for first 5 epochs to stabilize perceptual loss
+        if epoch < 5:
             for p in model.decoder.rrn.parameters():
                 p.requires_grad = False
         else:
@@ -73,16 +75,25 @@ def train_stage2(model, dataloader, epochs=100, device='cuda', ema=None):
                 loss_dict = criterion(x, x_hat, likelihoods, y=metrics.get('y_clean'))
                 loss = loss_dict['loss']
             
+            # ELITE AUDIT v5: NaN Safety Guard
+            if torch.isnan(loss):
+                print(f"⚠️ Warning: NaN Loss detected in Batch {batch_idx}. Skipping...")
+                optimizer.zero_grad()
+                continue
+            
             scaler.scale(loss).backward()
             
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(params_to_train, max_norm=1.0)
+            torch.nn.utils.clip_grad_value_(params_to_train, clip_value=1.0)
             
             scaler.step(optimizer)
             scaler.update()
             
-            # OneCycle scheduler step per batch
-            scheduler.step()
+            # OneCycle scheduler step per batch (suppress false warning with GradScaler)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                scheduler.step()
             
             # FIX 1: Invalidate QVS cache after weight update
             invalidate_qvs_cache(model)
@@ -138,7 +149,7 @@ if __name__ == "__main__":
     model = AetherCodec()
     # Search for latest weights from Stage 1
     found_weights = None
-    for f in ['stage1_latest.pth', 'stage1_foundation.pth', 'stage1_epoch_10.pth']:
+    for f in ['stage1_foundation.pth', 'stage1_latest.pth', 'stage1_epoch_50.pth', 'stage1_epoch_10.pth']:
         if os.path.exists(f):
             found_weights = f
             break
