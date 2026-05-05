@@ -22,12 +22,14 @@ def train_stage2(model, dataloader, epochs=100, device='cuda', ema=None):
     model.to(device)
     model.train()
     
-    # Freeze hyperprior
+    # DO NOT freeze hyperprior! Mathematically, if the encoder updates, 
+    # the latent distribution changes. The hyperprior MUST adapt to accurately 
+    # estimate entropy (bpp), otherwise cross-entropy penalty destroys the encoder.
     if model.use_hyperprior:
         for param in model.hyperprior.parameters():
-            param.requires_grad = False
+            param.requires_grad = True
             
-    criterion = RateDistortionLoss(lmbda=0.05, use_ms_ssim=True, use_lpips=True, use_entanglement=True, total_epochs=epochs, lpips_warmup_epochs=5).to(device)
+    criterion = RateDistortionLoss(lmbda=0.05, use_ms_ssim=True, use_lpips=True, use_entanglement=True, total_epochs=epochs, lpips_warmup_epochs=5, rate_warmup_pct=0.0).to(device)
     
     # Train only main codec parameters (encoder, decoder, quantizer)
     params_to_train = [p for n, p in model.named_parameters() if p.requires_grad]
@@ -67,8 +69,9 @@ def train_stage2(model, dataloader, epochs=100, device='cuda', ema=None):
             
             optimizer.zero_grad()
             
-            # FIX 5: Quantization Curriculum (mostly hard in Stage 2)
-            hard_prob = min(1.0, max(0.5, (epoch + 10) / (epochs + 10)))
+            # FIX 5: Quantization Curriculum (Stage 1 already reached 1.0, so keep it at 1.0)
+            # Dropping it back to 0.5 causes regression from Stage 1 performance.
+            hard_prob = 1.0
             
             with autocast('cuda'):
                 x_hat, likelihoods, metrics = model(x, hard_prob=hard_prob)
