@@ -65,12 +65,19 @@ def run_inference(image_path, model_path, device='cuda'):
     else:
         img = Image.open(image_path).convert('RGB')
         transform = transforms.Compose([
-            transforms.Resize(512),
-            transforms.CenterCrop(512),
             transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
         ])
         x = transform(img).unsqueeze(0).to(device)
+        
+        # Pad to multiple of 64 for the codec
+        _, _, H, W = x.size()
+        pad_h = (64 - H % 64) % 64
+        pad_w = (64 - W % 64) % 64
+        if pad_h > 0 or pad_w > 0:
+            x_padded = torch.nn.functional.pad(x, (0, pad_w, 0, pad_h), mode='reflect')
+        else:
+            x_padded = x
     
     vram0 = get_gpu_stats()
     
@@ -80,7 +87,7 @@ def run_inference(image_path, model_path, device='cuda'):
         t0 = time.perf_counter()
         
         # Expert Encode
-        y, _ = model.encoder(x, return_skips=True)
+        y, _ = model.encoder(x_padded, return_skips=True)
         
         # Sovereign Quantization
         y_hat, y_step = model.y_quantizer(y, hard_prob=1.0)
@@ -105,7 +112,10 @@ def run_inference(image_path, model_path, device='cuda'):
         y_recon, z_recon, y_step_recv, z_step_recv = coder.decompress(file_path, device=device)
         
         # Synthesis (Skips=None for true P2P simulation)
-        x_hat = model.decoder(y_recon, encoder_skips=None)
+        x_hat_padded = model.decoder(y_recon, encoder_skips=None)
+        
+        # Crop back to original resolution
+        x_hat = x_hat_padded[:, :, :H, :W]
         
         t_recv = time.perf_counter() - t1
         
