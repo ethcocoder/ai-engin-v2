@@ -31,7 +31,9 @@ print(f"✅ PyTorch {torch.__version__} initialized on {torch.cuda.get_device_na
 *Run these stages sequentially. Each stage builds upon the previous one.*
 
 ### Stage 1: The Foundation (Core Compression)
-*Focus: Learning the base latent representation and GMM entropy model with **DSQ (Differentiable Soft Quantization)**.*
+*Focus: Learning the base latent representation and GMM entropy model using the **Massive Elite Corpus (15,000+ samples)** for maximum generalization.*
+> [!IMPORTANT]
+> Using `--data_dir auto` will now download ~8.5GB of high-fidelity data (DIV2K, CLIC, COCO, Flickr). Ensure you have enough disk space in your Colab environment.
 ```python
 !python src/train/stage1.py --epochs 10 --batch_size 16 --data_dir auto
 ```
