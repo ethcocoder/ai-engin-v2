@@ -131,13 +131,29 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=50, help="Number of training epochs")
     parser.add_argument("--batch_size", type=int, default=8, help="Batch size")
     parser.add_argument("--data_dir", type=str, default="auto", help="Path to dataset (or 'auto' to download)")
+    parser.add_argument("--no_clic", action="store_true", help="Disable CLIC 2020 dataset")
+    parser.add_argument("--no_massive", action="store_true", help="Disable COCO + Flickr massive corpus")
+    parser.add_argument("--use_flickr2k", action="store_true", help="Enable Flickr2K (requires ~20GB space)")
     args = parser.parse_args()
     
     print(f"Initializing AetherCodec Stage 1 Training...")
     print(f"Epochs: {args.epochs}, Batch Size: {args.batch_size}, Data: {args.data_dir}")
+    print(f"Dataset Config: Massive={'Disabled' if args.no_massive else 'Enabled'}, CLIC={'Disabled' if args.no_clic else 'Enabled'}, Flickr2K={'Enabled' if args.use_flickr2k else 'Disabled'}")
     
     model = AetherCodec()
-    loader = get_dataloader(args.data_dir, batch_size=args.batch_size)
+    # If the user has a previous checkpoint, they might want to resume
+    if os.path.exists('stage1_latest.pth'):
+        print("Found existing checkpoint. Resuming...")
+        checkpoint = torch.load('stage1_latest.pth', map_location='cpu')
+        model.load_state_dict(checkpoint['state_dict'])
+
+    loader = get_dataloader(
+        args.data_dir, 
+        batch_size=args.batch_size, 
+        use_clic=not args.no_clic,
+        use_10k_plus=not args.no_massive
+    )
+    
     model, ema = train_stage1(model, loader, epochs=args.epochs)
     
     torch.save(model.state_dict(), 'stage1_foundation.pth')

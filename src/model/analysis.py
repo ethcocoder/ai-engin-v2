@@ -54,7 +54,7 @@ class PositionalEncoding2D(nn.Module):
     """
     FIX 8: 2D Sinusoidal Positional Encoding for Transformer blocks.
     """
-    def __init__(self, channels, max_h=64, max_w=64):
+    def __init__(self, channels, max_h=256, max_w=256):
         super().__init__()
         pe = torch.zeros(1, channels, max_h, max_w)
         y_pos = torch.arange(max_h).unsqueeze(1).float()

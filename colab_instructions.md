@@ -58,7 +58,7 @@ print(f"✅ PyTorch {torch.__version__} initialized on {torch.cuda.get_device_na
 !wget -O test_hd.jpg "https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?q=80&w=2074&auto=format&fit=crop"
 
 # 1. Verify Stage 1: Base Compression (MSE/BPP)
-!python src/inference.py --image test_hd.jpg --model stage1_latest.pth
+!python src/inference.py --image test_hd.jpg --model stage1_foundation.pth
 
 # 2. Verify Stage 2: Structural Refinement (SSIM/LPIPS)
 !python src/inference.py --image test_hd.jpg --model stage2_refined.pth

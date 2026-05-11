@@ -155,14 +155,24 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=25, help="Number of training epochs")
     parser.add_argument("--batch_size", type=int, default=8, help="Batch size")
     parser.add_argument("--data_dir", type=str, default="auto", help="Path to dataset")
+    parser.add_argument("--no_clic", action="store_true", help="Disable CLIC 2020 dataset")
+    parser.add_argument("--no_massive", action="store_true", help="Disable COCO + Flickr massive corpus")
+    parser.add_argument("--use_flickr2k", action="store_true", help="Enable Flickr2K (requires ~20GB space)")
     args = parser.parse_args()
     
-    model = AetherCodec()
+    print(f"Initializing AetherCodec Stage 3 Training...")
+    print(f"Epochs: {args.epochs}, Batch Size: {args.batch_size}, Data: {args.data_dir}")
+    print(f"Dataset Config: Massive={'Disabled' if args.no_massive else 'Enabled'}, CLIC={'Disabled' if args.no_clic else 'Enabled'}, Flickr2K={'Enabled' if args.use_flickr2k else 'Disabled'}")
     if os.path.exists('stage2_refined.pth'):
         model.load_state_dict(torch.load('stage2_refined.pth', weights_only=True))
         print("Loaded Stage 2 weights.")
         
-    loader = get_dataloader(args.data_dir, batch_size=args.batch_size)
+    loader = get_dataloader(
+        args.data_dir, 
+        batch_size=args.batch_size, 
+        use_clic=not args.no_clic,
+        use_10k_plus=not args.no_massive
+    )
     model, ema = train_stage3(model, loader, epochs=args.epochs)
     
     torch.save(model.state_dict(), 'stage3_elite_final.pth')
