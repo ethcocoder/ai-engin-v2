@@ -18,14 +18,18 @@ from src.utils.metrics import psnr, ms_ssim
 import random
 
 def find_random_image(dataset_path="dataset"):
-    """Finds a random image in the dataset directory."""
+    """Finds a random image in the dataset directory, ignoring macOS artifacts."""
     image_extensions = (".jpg", ".jpeg", ".png")
     all_images = []
     if not os.path.exists(dataset_path):
         return None
     for root, dirs, files in os.walk(dataset_path):
+        # Ignore macOS metadata directories
+        if "__MACOSX" in root:
+            continue
         for file in files:
-            if file.lower().endswith(image_extensions):
+            # Ignore hidden macOS '._' files and check extension
+            if file.lower().endswith(image_extensions) and not file.startswith("._"):
                 all_images.append(os.path.join(root, file))
     return random.choice(all_images) if all_images else None
 
