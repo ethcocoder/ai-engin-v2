@@ -15,6 +15,19 @@ if project_root not in sys.path:
 from src.model.hybrid_codec import TiledHybridCodec
 from src.utils.hybrid_coder import HybridEntropyCoder
 from src.utils.metrics import psnr, ms_ssim
+import random
+
+def find_random_image(dataset_path="dataset"):
+    """Finds a random image in the dataset directory."""
+    image_extensions = (".jpg", ".jpeg", ".png")
+    all_images = []
+    if not os.path.exists(dataset_path):
+        return None
+    for root, dirs, files in os.walk(dataset_path):
+        for file in files:
+            if file.lower().endswith(image_extensions):
+                all_images.append(os.path.join(root, file))
+    return random.choice(all_images) if all_images else None
 
 def run_hybrid_inference(image_path, model_path, threshold=50.0, device='cuda'):
     """
@@ -41,6 +54,13 @@ def run_hybrid_inference(image_path, model_path, threshold=50.0, device='cuda'):
     coder = HybridEntropyCoder()
     
     # 1. Load Image
+    if image_path.lower() == "random":
+        image_path = find_random_image()
+        if not image_path:
+            print("❌ Error: No images found in 'dataset' directory for random selection.")
+            return
+        print(f"🎲 Randomly selected: {image_path}")
+
     if not os.path.exists(image_path):
         print(f"❌ Error: Image {image_path} not found.")
         return

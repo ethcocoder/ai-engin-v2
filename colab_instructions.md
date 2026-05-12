@@ -48,6 +48,9 @@ This documentation guides you through training and deploying **AetherCodec-Elite
 # Standard Hybrid (Balanced)
 !python src/inference_hybrid.py --image test_hd.jpg --model stage1_foundation.pth --threshold 50.0
 
+# 🎲 Test on a Random Image from your Dataset
+!python src/inference_hybrid.py --image random --model stage1_foundation.pth --threshold 50.0
+
 # Aggressive Hybrid (More Math, Smaller Files)
 !python src/inference_hybrid.py --image test_hd.jpg --model stage1_foundation.pth --threshold 20.0
 
