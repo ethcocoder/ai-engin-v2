@@ -19,14 +19,6 @@ from .aether_codec import AetherCodec
 class TiledHybridCodec(nn.Module):
     """
     Aether-Blueprint: Hybrid Rule-Based + Neural Image Codec.
-    
-    Flow:
-        Image → Split into 16 tiles → Classify each tile →
-        Simple tiles → Polynomial fit (72 bytes each)
-        Complex tiles → Neural encode (variable KB each)
-        → Pack into .padox → Transmit →
-        → Unpack → Render poly / Decode neural →
-        → Gaussian stitch → Output Image
     """
     def __init__(self, tile_size=128, overlap=16, complexity_threshold=50.0,
                  use_attention=True, use_hyperprior=True):
@@ -77,6 +69,7 @@ class TiledHybridCodec(nn.Module):
         decisions, scores = self.gate.decide(tiles_stacked) # (B, 16)
         
         # Step 3: Vectorized Encoding
+        # Batch Polynomial Fitting
         coeffs_all, _ = self.poly.fit(tiles_stacked.reshape(-1, 3, self.padded_tile, self.padded_tile))
         
         neural_data = None
@@ -87,6 +80,7 @@ class TiledHybridCodec(nn.Module):
             tile_padded, _, _ = self._pad_tile_for_neural(complex_tiles)
             
             with torch.set_grad_enabled(self.training):
+                # Mixed Precision Support (Level 2)
                 with torch.cuda.amp.autocast(enabled=torch.cuda.is_available()):
                     x_hat_neu, likelihoods, metrics = self.neural(
                         tile_padded, 
@@ -110,7 +104,7 @@ class TiledHybridCodec(nn.Module):
     
     def decode(self, encoding, device='cuda'):
         """
-        Vectorized decode.
+        Vectorized decode: Renders all tiles in two GPU passes.
         """
         grid = encoding['grid']
         decisions = encoding['decisions']
@@ -118,12 +112,12 @@ class TiledHybridCodec(nn.Module):
         coeffs_all = encoding['poly_coeffs_all']
         neural_data = encoding['neural_data']
         
-        # 1. Render Polynomials
+        # 1. Render all Polynomial tiles
         decoded_tiles = self.poly.render(coeffs_all.reshape(B * num_tiles, 3, 10), 
                                         size=self.padded_tile)
         decoded_tiles = decoded_tiles.view(B, num_tiles, 3, self.padded_tile, self.padded_tile)
         
-        # 2. Overwrite with Neural
+        # 2. Overwrite Complex tiles with Neural decodes
         if neural_data is not None:
             complex_mask = neural_data['mask']
             y_hat = neural_data['metrics']['y_hat']
@@ -133,14 +127,18 @@ class TiledHybridCodec(nn.Module):
                     x_hat_neu = self.neural.decoder(y_hat, encoder_skips=None)
             
             x_hat_neu = self._crop_tile(x_hat_neu, self.padded_tile, self.padded_tile)
+            
+            # Place complex tiles back into the grid
             flat_decoded = decoded_tiles.view(B * num_tiles, 3, self.padded_tile, self.padded_tile)
             flat_decoded[complex_mask] = x_hat_neu
             decoded_tiles = flat_decoded.view(B, num_tiles, 3, self.padded_tile, self.padded_tile)
         
-        return self.tiler.stitch(decoded_tiles, grid, channels=3)
+        # 3. Vectorized Stitch
+        image = self.tiler.stitch(decoded_tiles, grid, channels=3)
+        return torch.clamp(image, -1.0, 1.0)
     
     def forward(self, image, hard_prob=None):
-        """Fast Forward Pass."""
+        """Fast Forward Pass for Training."""
         encoding = self.encode(image)
         x_hat = self.decode(encoding, device=image.device)
         
@@ -157,6 +155,7 @@ class TiledHybridCodec(nn.Module):
             'num_neural_tiles': num_complex,
             'poly_ratio': (num_total - num_complex) / num_total,
         }
+        
         return x_hat, likelihoods, metrics
     
     def get_compression_stats(self, encoding):
@@ -174,10 +173,11 @@ class TiledHybridCodec(nn.Module):
         neural_bytes = 0
         if encoding['neural_data']:
             y_hat = encoding['neural_data']['metrics']['y_hat']
-            # int16 + zlib ≈ 50% compression
+            # int16 + zlib ≈ 50% compression on quantized data
             neural_bytes += y_hat.numel() * 2 * 0.5
         
         header_bytes = 64 + 2
+        
         return {
             'total_bytes': header_bytes + poly_bytes + int(neural_bytes),
             'poly_bytes': poly_bytes,
