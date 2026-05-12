@@ -46,70 +46,59 @@ class TileManager(nn.Module):
     
     def split(self, image):
         """
-        Split image into overlapping tiles.
-        
-        Args:
-            image: (B, C, H, W) tensor, H and W must be divisible by tile_size
-        Returns:
-            tiles: list of (B, C, 160, 160) tensors
-            grid: (rows, cols) tuple
+        Split image into overlapping tiles using vectorized 'unfold'.
+        Returns stacked tensor: (B, num_tiles, C, 160, 160)
         """
         B, C, H, W = image.shape
-        rows = H // self.tile_size
-        cols = W // self.tile_size
         o = self.overlap
+        s = self.tile_size
+        p = self.padded_tile
         
-        # Pad image by overlap on all sides (reflect for natural edges)
+        # 1. Vectorized Padding
         padded = F.pad(image, [o, o, o, o], mode='reflect')
         
-        tiles = []
-        for r in range(rows):
-            for c in range(cols):
-                r0 = r * self.tile_size
-                c0 = c * self.tile_size
-                tile = padded[:, :, r0:r0 + self.padded_tile,
-                                    c0:c0 + self.padded_tile]
-                tiles.append(tile)
+        # 2. Vectorized Extraction using Unfold
+        # Extract sliding windows of size 160x160 with stride 128
+        # Output: (B, C * 160 * 160, num_tiles)
+        tiles = F.unfold(padded, kernel_size=p, stride=s)
         
+        # 3. Reshape to (B, num_tiles, C, 160, 160)
+        num_tiles = tiles.shape[-1]
+        tiles = tiles.view(B, C, p, p, num_tiles).permute(0, 4, 1, 2, 3)
+        
+        rows = H // s
+        cols = W // s
         return tiles, (rows, cols)
     
-    def stitch(self, tiles, grid, channels=3):
+    def stitch(self, tiles_stacked, grid, channels=3):
         """
-        Reassemble tiles using Gaussian alpha blending.
-        
-        Args:
-            tiles: list of (B, C, 160, 160) decoded tile tensors
-            grid: (rows, cols)
-        Returns:
-            image: (B, C, H, W)
+        Vectorized reassembly using Gaussian alpha blending.
+        Input: (B, num_tiles, C, 160, 160)
         """
         rows, cols = grid
-        B = tiles[0].shape[0]
-        device = tiles[0].device
-        H = rows * self.tile_size
-        W = cols * self.tile_size
+        B, num_tiles, C, p, _ = tiles_stacked.shape
+        device = tiles_stacked.device
         o = self.overlap
+        s = self.tile_size
+        H, W = rows * s, cols * s
         
-        # Accumulators on padded canvas
+        # Target canvas sizes
         pH, pW = H + 2 * o, W + 2 * o
-        canvas = torch.zeros(B, channels, pH, pW, device=device)
-        weight = torch.zeros(B, 1, pH, pW, device=device)
         
-        mask = self._blend_mask.to(device)  # (160, 160)
+        # Prepare Mask for Fold
+        mask = self._blend_mask.to(device).view(1, 1, p, p).expand(B, 1, p, p)
         
-        idx = 0
-        for r in range(rows):
-            for c in range(cols):
-                r0 = r * self.tile_size
-                c0 = c * self.tile_size
-                tile = tiles[idx]
-                
-                canvas[:, :, r0:r0 + self.padded_tile,
-                             c0:c0 + self.padded_tile] += tile * mask
-                weight[:, :, r0:r0 + self.padded_tile,
-                             c0:c0 + self.padded_tile] += mask
-                idx += 1
+        # Weight each tile by its Gaussian mask
+        weighted_tiles = tiles_stacked * mask.unsqueeze(1) # (B, num_tiles, C, 160, 160)
         
-        # Normalize and crop back to original size
-        canvas = canvas / (weight + 1e-8)
+        # Prepare for 'fold': (B, C * p * p, num_tiles)
+        weighted_tiles = weighted_tiles.permute(0, 2, 3, 4, 1).reshape(B, C * p * p, num_tiles)
+        weights_expanded = mask.unsqueeze(4).expand(B, 1, p, p, num_tiles).reshape(B, 1 * p * p, num_tiles)
+        
+        # Use F.fold to accumulate overlapping regions
+        canvas = F.fold(weighted_tiles, output_size=(pH, pW), kernel_size=p, stride=s)
+        weight_map = F.fold(weights_expanded, output_size=(pH, pW), kernel_size=p, stride=s)
+        
+        # Normalize and crop
+        canvas = canvas / (weight_map + 1e-8)
         return canvas[:, :, o:o + H, o:o + W]

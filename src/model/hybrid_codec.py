@@ -67,216 +67,121 @@ class TiledHybridCodec(nn.Module):
     
     def encode(self, image):
         """
-        Encode a full image using the hybrid pipeline.
-        
-        Args:
-            image: (B, 3, H, W) tensor in [-1, 1]
-        Returns:
-            encoding: dict with all data needed for decoding and .padox packing
+        Encode a full image using the vectorized hybrid pipeline.
         """
         B = image.shape[0]
+        tiles_stacked, grid = self.tiler.split(image) # (B, 16, 3, 160, 160)
+        num_tiles = tiles_stacked.shape[1]
         
-        # Step 1: Split into tiles
-        tiles, grid = self.tiler.split(image)
-        num_tiles = len(tiles)
+        # Step 2: Vectorized Classification
+        decisions, scores = self.gate.decide(tiles_stacked) # (B, 16)
         
-        # Step 2: Classify each tile
-        decisions, scores = self.gate.decide(tiles)
+        # Step 3: Vectorized Encoding
+        coeffs_all, _ = self.poly.fit(tiles_stacked.reshape(-1, 3, self.padded_tile, self.padded_tile))
         
-        # Step 3: Encode each tile via its assigned path
-        poly_coeffs = {}      # tile_idx → (B, 3, 6)
-        poly_residuals = {}   # tile_idx → (B,)
-        neural_latents = {}   # tile_idx → {y_hat, y_step, z_hat, z_step, ...}
-        neural_likelihoods = {}
-        neural_metrics = {}
-        
-        for i, tile in enumerate(tiles):
-            # Check if ALL items in batch agree on decision
-            # (For simplicity, use majority vote)
-            is_complex = decisions[:, i].float().mean() > 0.5
+        neural_data = None
+        complex_mask = decisions.view(-1).bool()
+        if complex_mask.any():
+            flat_tiles = tiles_stacked.reshape(-1, 3, self.padded_tile, self.padded_tile)
+            complex_tiles = flat_tiles[complex_mask]
+            tile_padded, _, _ = self._pad_tile_for_neural(complex_tiles)
             
-            if not is_complex:
-                # --- RULE-BASED PATH ---
-                coeffs, residual = self.poly.fit(tile)
-                poly_coeffs[i] = coeffs
-                poly_residuals[i] = residual
-            else:
-                # --- NEURAL PATH ---
-                tile_padded, orig_h, orig_w = self._pad_tile_for_neural(tile)
-                
-                with torch.set_grad_enabled(self.training):
-                    x_hat, likelihoods, metrics = self.neural(
+            with torch.set_grad_enabled(self.training):
+                with torch.cuda.amp.autocast(enabled=torch.cuda.is_available()):
+                    x_hat_neu, likelihoods, metrics = self.neural(
                         tile_padded, 
                         hard_prob=1.0 if not self.training else None
                     )
-                
-                x_hat = self._crop_tile(x_hat, orig_h, orig_w)
-                
-                neural_latents[i] = {
-                    'y_hat': metrics['y_hat'],
-                    'y_step': metrics['y_step'],
-                    'z_hat': metrics.get('z_hat'),
-                    'z_step': metrics.get('z_step'),
-                    'orig_h': orig_h,
-                    'orig_w': orig_w,
-                }
-                neural_likelihoods[i] = likelihoods
-                neural_metrics[i] = metrics
-        
+            
+            neural_data = {
+                'metrics': metrics,
+                'likelihoods': likelihoods,
+                'mask': complex_mask
+            }
+            
         return {
             'grid': grid,
             'decisions': decisions,
             'scores': scores,
-            'poly_coeffs': poly_coeffs,
-            'poly_residuals': poly_residuals,
-            'neural_latents': neural_latents,
-            'neural_likelihoods': neural_likelihoods,
-            'neural_metrics': neural_metrics,
+            'poly_coeffs_all': coeffs_all.view(B, num_tiles, 3, 10),
+            'neural_data': neural_data,
             'num_tiles': num_tiles,
         }
     
     def decode(self, encoding, device='cuda'):
         """
-        Decode from the hybrid encoding back to a full image.
-        
-        Args:
-            encoding: dict from encode() or from .padox decompression
-        Returns:
-            image: (B, 3, H, W) reconstructed image
+        Vectorized decode.
         """
         grid = encoding['grid']
         decisions = encoding['decisions']
-        poly_coeffs = encoding['poly_coeffs']
-        neural_latents = encoding['neural_latents']
-        num_tiles = encoding['num_tiles']
+        B, num_tiles = decisions.shape
+        coeffs_all = encoding['poly_coeffs_all']
+        neural_data = encoding['neural_data']
         
-        decoded_tiles = []
+        # 1. Render Polynomials
+        decoded_tiles = self.poly.render(coeffs_all.reshape(B * num_tiles, 3, 10), 
+                                        size=self.padded_tile)
+        decoded_tiles = decoded_tiles.view(B, num_tiles, 3, self.padded_tile, self.padded_tile)
         
-        for i in range(num_tiles):
-            is_complex = decisions[:, i].float().mean() > 0.5
+        # 2. Overwrite with Neural
+        if neural_data is not None:
+            complex_mask = neural_data['mask']
+            y_hat = neural_data['metrics']['y_hat']
             
-            if not is_complex and i in poly_coeffs:
-                # --- RULE-BASED DECODE ---
-                tile = self.poly.render(poly_coeffs[i], size=self.padded_tile)
-                decoded_tiles.append(tile)
-            elif i in neural_latents:
-                # --- NEURAL DECODE ---
-                lat = neural_latents[i]
-                y_hat = lat['y_hat']
-                
-                with torch.no_grad():
-                    x_hat = self.neural.decoder(y_hat, encoder_skips=None)
-                
-                x_hat = self._crop_tile(x_hat, lat['orig_h'], lat['orig_w'])
-                decoded_tiles.append(x_hat)
-            else:
-                # Fallback: black tile
-                B = decisions.shape[0]
-                decoded_tiles.append(
-                    torch.zeros(B, 3, self.padded_tile, self.padded_tile, device=device)
-                )
+            with torch.no_grad():
+                with torch.cuda.amp.autocast(enabled=torch.cuda.is_available()):
+                    x_hat_neu = self.neural.decoder(y_hat, encoder_skips=None)
+            
+            x_hat_neu = self._crop_tile(x_hat_neu, self.padded_tile, self.padded_tile)
+            flat_decoded = decoded_tiles.view(B * num_tiles, 3, self.padded_tile, self.padded_tile)
+            flat_decoded[complex_mask] = x_hat_neu
+            decoded_tiles = flat_decoded.view(B, num_tiles, 3, self.padded_tile, self.padded_tile)
         
-        # Step 4: Stitch with Gaussian blending
-        image = self.tiler.stitch(decoded_tiles, grid, channels=3)
-        return torch.clamp(image, -1.0, 1.0)
+        return self.tiler.stitch(decoded_tiles, grid, channels=3)
     
     def forward(self, image, hard_prob=None):
-        """
-        Full forward pass for training.
-        Returns reconstructed image, likelihoods, and metrics.
-        """
+        """Fast Forward Pass."""
         encoding = self.encode(image)
+        x_hat = self.decode(encoding, device=image.device)
         
-        # Decode all tiles
-        grid = encoding['grid']
-        decisions = encoding['decisions']
-        decoded_tiles = []
-        
-        all_likelihoods = {'y': [], 'z': []}
-        
-        for i in range(encoding['num_tiles']):
-            is_complex = decisions[:, i].float().mean() > 0.5
+        likelihoods = {}
+        if encoding['neural_data']:
+            likelihoods = encoding['neural_data']['likelihoods']
             
-            if not is_complex and i in encoding['poly_coeffs']:
-                tile = self.poly.render(encoding['poly_coeffs'][i], 
-                                        size=self.padded_tile)
-                decoded_tiles.append(tile)
-            elif i in encoding['neural_latents']:
-                lat = encoding['neural_latents'][i]
-                x_hat = self.neural.decoder(lat['y_hat'], encoder_skips=None)
-                x_hat = self._crop_tile(x_hat, lat['orig_h'], lat['orig_w'])
-                decoded_tiles.append(x_hat)
-                
-                # Collect likelihoods for rate computation
-                if i in encoding['neural_likelihoods']:
-                    lk = encoding['neural_likelihoods'][i]
-                    if 'y' in lk:
-                        all_likelihoods['y'].append(lk['y'])
-                    if 'z' in lk:
-                        all_likelihoods['z'].append(lk['z'])
-            else:
-                B = image.shape[0]
-                decoded_tiles.append(
-                    torch.zeros(B, 3, self.padded_tile, self.padded_tile, 
-                               device=image.device)
-                )
-        
-        x_hat = self.tiler.stitch(decoded_tiles, grid, channels=3)
-        x_hat = torch.clamp(x_hat, -1.0, 1.0)
-        
-        # Merge likelihoods from all neural tiles
-        merged_likelihoods = {}
-        if all_likelihoods['y']:
-            merged_likelihoods['y'] = torch.cat(all_likelihoods['y'], dim=0)
-        if all_likelihoods['z']:
-            merged_likelihoods['z'] = torch.cat(all_likelihoods['z'], dim=0)
-        
-        # Build metrics
-        num_poly = len(encoding['poly_coeffs'])
-        num_neural = len(encoding['neural_latents'])
+        num_complex = encoding['decisions'].sum().item()
+        num_total = encoding['num_tiles'] * image.shape[0]
         
         metrics = {
-            'decisions': decisions,
-            'scores': encoding['scores'],
-            'num_poly_tiles': num_poly,
-            'num_neural_tiles': num_neural,
-            'poly_ratio': num_poly / max(1, encoding['num_tiles']),
+            'decisions': encoding['decisions'],
+            'num_poly_tiles': num_total - num_complex,
+            'num_neural_tiles': num_complex,
+            'poly_ratio': (num_total - num_complex) / num_total,
         }
-        
-        # Add poly residuals to metrics
-        if encoding['poly_residuals']:
-            avg_residual = torch.stack(list(encoding['poly_residuals'].values())).mean()
-            metrics['poly_residual_mse'] = avg_residual
-        
-        return x_hat, merged_likelihoods, metrics
+        return x_hat, likelihoods, metrics
     
     def get_compression_stats(self, encoding):
         """
-        Estimate the .padox file size for this encoding.
+        Estimate the .bpox file size (Upgrade v2).
         """
-        num_poly = len(encoding['poly_coeffs'])
-        num_neural = len(encoding['neural_latents'])
+        num_complex = encoding['decisions'].sum().item()
+        num_total = encoding['num_tiles']
+        num_poly = num_total - num_complex
         
-        # Polynomial: 6 coeffs × 3 channels × 4 bytes = 72 bytes per tile
-        poly_bytes = num_poly * 72
+        # Polynomial: 10 coeffs × 3 channels × 4 bytes = 120 bytes per tile
+        poly_bytes = num_poly * 120
         
         # Neural: estimate from latent size
         neural_bytes = 0
-        for lat in encoding['neural_latents'].values():
-            y_hat = lat['y_hat']
-            # int16 + zlib ≈ 50% compression on quantized data
+        if encoding['neural_data']:
+            y_hat = encoding['neural_data']['metrics']['y_hat']
+            # int16 + zlib ≈ 50% compression
             neural_bytes += y_hat.numel() * 2 * 0.5
-            if lat['z_hat'] is not None:
-                neural_bytes += lat['z_hat'].numel() * 2 * 0.5
         
-        # Header + decision map
         header_bytes = 64 + 2
-        
         return {
             'total_bytes': header_bytes + poly_bytes + int(neural_bytes),
             'poly_bytes': poly_bytes,
             'neural_bytes': int(neural_bytes),
-            'header_bytes': header_bytes,
             'num_poly': num_poly,
-            'num_neural': num_neural,
+            'num_neural': num_complex,
         }

@@ -50,20 +50,22 @@ class ComplexityGate(nn.Module):
         return score
     
     @torch.no_grad()
-    def decide(self, tiles):
+    def decide(self, tiles_stacked):
         """
-        Classify each tile as simple (0) or complex (1).
+        Classify all tiles in a batch as simple (0) or complex (1).
+        Input: (B, num_tiles, 3, 160, 160)
         """
-        B = tiles[0].shape[0]
-        num_tiles = len(tiles)
+        B, num_tiles, C, H, W = tiles_stacked.shape
         
-        scores = torch.zeros(B, num_tiles, device=tiles[0].device)
-        decisions = torch.zeros(B, num_tiles, dtype=torch.long, device=tiles[0].device)
+        # Flatten B and num_tiles to process all tiles at once: (B * num_tiles, 3, 160, 160)
+        flat_tiles = tiles_stacked.reshape(B * num_tiles, C, H, W)
         
-        for i, tile in enumerate(tiles):
-            s = self.analyze(tile)
-            scores[:, i] = s
-            decisions[:, i] = (s > self.threshold).long()
+        # Vectorized Analysis
+        scores = self.analyze(flat_tiles) # (B * num_tiles,)
+        
+        # Reshape back to (B, num_tiles)
+        scores = scores.view(B, num_tiles)
+        decisions = (scores > self.threshold).long()
         
         return decisions, scores
 
