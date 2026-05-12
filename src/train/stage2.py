@@ -14,93 +14,80 @@ from src.loss.rate_distortion import RateDistortionLoss
 from src.model.qvs_flow import invalidate_qvs_cache
 from src.utils.ema import EMA
 
-def train_stage2(model, dataloader, epochs=100, device='cuda', ema=None, lmbda=0.05):
+def train_stage2(model, dataloader, epochs=100, device='cuda', ema=None, lmbda=0.005):
     """
-    Stage 2: Switch distortion to MS-SSIM. lambda=0.05. 
-    Freeze hyperprior, train main codec.
+    Stage 2: Perceptual Refinement.
+    Switches to MS-SSIM + LPIPS loss and aggressively penalizes BPP to reach < 0.5.
+    Unfreezes the Residual Refinement Network (RRN) for detail recovery.
     """
     model.to(device)
     model.train()
     
-    # DO NOT freeze hyperprior! Mathematically, if the encoder updates, 
-    # the latent distribution changes. The hyperprior MUST adapt to accurately 
-    # estimate entropy (bpp), otherwise cross-entropy penalty destroys the encoder.
-    if model.use_hyperprior:
-        for param in model.hyperprior.parameters():
-            param.requires_grad = True
+    # Ensure all components (including hyperprior) are trainable
+    for param in model.parameters():
+        param.requires_grad = True
             
-    criterion = RateDistortionLoss(lmbda=lmbda, use_ms_ssim=True, use_lpips=True, use_entanglement=True, total_epochs=epochs, lpips_warmup_epochs=5, rate_warmup_pct=0.0, max_bpp=4.0).to(device)
+    # Stage 2 Loss: L1 + MS-SSIM + LPIPS. Lower lambda (0.005) forces BPP down.
+    criterion = RateDistortionLoss(
+        lmbda=lmbda, 
+        use_ms_ssim=True, 
+        use_lpips=True, 
+        use_entanglement=True, 
+        total_epochs=epochs, 
+        lpips_warmup_epochs=0, # Start LPIPS immediately for Stage 2
+        rate_warmup_pct=0.0,    # Rate pressure is already active
+        max_bpp=4.0
+    ).to(device)
     
-    # Train only main codec parameters (encoder, decoder, quantizer)
     params_to_train = [p for n, p in model.named_parameters() if p.requires_grad]
-    # ELITE ACCURACY: OneCycleLR for faster convergence
     optimizer = AdamW(params_to_train, lr=1e-4, betas=(0.9, 0.999), weight_decay=1e-4)
+    
     scheduler = torch.optim.lr_scheduler.OneCycleLR(
         optimizer, max_lr=1e-4, 
         steps_per_epoch=len(dataloader), 
         epochs=epochs,
-        pct_start=0.3,
-        div_factor=10,
-        final_div_factor=100
+        pct_start=0.1, # Faster ramp-up
+        div_factor=10
     )
     scaler = GradScaler('cuda')
     
     if ema is None:
         ema = EMA(model, decay=0.999)
         
-    print(f"Starting Stage 2 Training for {epochs} epochs...")
+    print(f"🚀 Starting Stage 2 Training (Target BPP < 0.5) for {epochs} epochs...")
     
     for epoch in range(epochs):
-        # FIX 8: Freeze RRN for first 5 epochs to stabilize perceptual loss
-        if epoch < 5:
-            for p in model.decoder.rrn.parameters():
-                p.requires_grad = False
-        else:
-            for p in model.decoder.rrn.parameters():
-                p.requires_grad = True
-                
-        # FIX: Synchronize loss engine with current epoch for warmups
         criterion.set_epoch(epoch)
-        
         epoch_loss = 0.0
         pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}")
+        
         for batch_idx, data in enumerate(pbar):
             x = data[0].to(device) if isinstance(data, (list, tuple)) else data.to(device)
-            
             optimizer.zero_grad()
             
-            # FIX 5: Quantization Curriculum (Stage 1 already reached 1.0, so keep it at 1.0)
-            # Dropping it back to 0.5 causes regression from Stage 1 performance.
-            hard_prob = 1.0
+            hard_prob = 1.0 # Maintain production-ready quantization
             
             with autocast('cuda'):
                 x_hat, likelihoods, metrics = model(x, hard_prob=hard_prob)
                 loss_dict = criterion(x, x_hat, likelihoods, y=metrics.get('y_clean'))
                 loss = loss_dict['loss']
             
-            # ELITE AUDIT v5: NaN Safety Guard
             if torch.isnan(loss):
-                print(f"⚠️ Warning: NaN Loss detected in Batch {batch_idx}. Skipping...")
                 optimizer.zero_grad()
                 continue
             
             scaler.scale(loss).backward()
-            
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(params_to_train, max_norm=1.0)
-            torch.nn.utils.clip_grad_value_(params_to_train, clip_value=1.0)
             
             scaler.step(optimizer)
             scaler.update()
             
-            # OneCycle scheduler step per batch (suppress false warning with GradScaler)
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 scheduler.step()
             
-            # FIX 1: Invalidate QVS cache after weight update
             invalidate_qvs_cache(model)
-            
             ema.update(model)
             
             epoch_loss += loss.item()
@@ -109,28 +96,23 @@ def train_stage2(model, dataloader, epochs=100, device='cuda', ema=None, lmbda=0
                 pbar.set_postfix({
                     "loss": f"{loss.item():.4f}",
                     "bpp": f"{loss_dict['bpp_loss']:.4f}",
-                    "ms-ssim": f"{loss_dict['d_loss']:.4f}",
+                    "psnr_sim": f"{loss_dict['d_loss']:.4f}",
                     "lr": f"{optimizer.param_groups[0]['lr']:.2e}"
                 })
                 
         print(f"Epoch {epoch+1} Completed. Avg Loss: {epoch_loss/len(dataloader):.4f}")
 
-        # --- Checkpoint Saving ---
+        # Checkpoint Management
         checkpoint = {
             'epoch': epoch + 1,
             'state_dict': model.state_dict(),
             'ema_state_dict': ema.state_dict() if ema else None,
-            'optimizer_state_dict': optimizer.state_dict(),
         }
-        
-        # Save "Latest" (Overwrites every epoch)
         torch.save(checkpoint, 'stage2_latest.pth')
         
-        # Save "Milestone" every 10 epochs
-        if (epoch + 1) % 10 == 0:
+        if (epoch + 1) % 5 == 0:
             torch.save(checkpoint, f'stage2_epoch_{epoch+1}.pth')
-            print(f"Milestone checkpoint saved: stage2_epoch_{epoch+1}.pth")
-        
+            
     return model, ema
 
 if __name__ == "__main__":
