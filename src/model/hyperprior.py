@@ -99,7 +99,7 @@ class Hyperprior(nn.Module):
         # Hyper-analysis
         z = self.ha_net(y)
         
-        # FIX 2: QVS Unitary Coupling on continuous space for better gradients
+        # QVS Unitary Coupling on continuous space for better gradients
         z_mod_continuous = self.qvs(z)
         
         # Quantize hyper-latent
@@ -108,15 +108,14 @@ class Hyperprior(nn.Module):
         # Hyper-synthesis
         hs_features = self.hs_net(z_hat)
         
-        # FIX 9: Residual skip for stability
-        if hs_features.shape == z_hat.shape: # Check if resolution matches
+        # Residual skip for stability
+        if hs_features.shape == z_hat.shape:
             hs_features = hs_features + z_hat
         
         return z_hat, z_step, hs_features
 
     def get_gmm_params(self, hs_features, ctx_features):
-        # FIX 8: Raster-scan causality is already strictly enforced by MaskedConv2d.
-        # Removing redundant/incorrect 2D tril mask to restore full context power.
+        # Raster-scan causality is enforced by MaskedConv2d.
         combined = torch.cat([hs_features, ctx_features], dim=1)
         params = self.param_net(combined)
         B, _, H, W = params.shape
@@ -128,7 +127,7 @@ class Hyperprior(nn.Module):
         # Softplus for scale activation (stability)
         scales = F.softplus(params[:, :, :, 2]) * 0.1 + 1e-6
         
-        # FIX 5: Soft GMM temperature (1.0) for Lockdown Build stability
+        # Soft GMM temperature (1.0) for stability
         temperature = 1.0
         weights = torch.softmax(weights / temperature, dim=2)
         
