@@ -15,7 +15,7 @@ This documentation guides you through training and deploying **AetherCodec-Elite
 ## ⚡ 1. Setup Environment (Run Once)
 ```python
 # Clone the Elite v7 Branch
-!git clone -b v7 https://github.com/ethcocoder/ai-engin-v2.git
+!git clone -b v6 https://github.com/ethcocoder/ai-engin-v2.git
 %cd ai-engin-v2
 
 # Install Expert Dependencies
