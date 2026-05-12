@@ -37,6 +37,8 @@ class Hyperprior(nn.Module):
         self.num_components = num_components
         
         # Hyper-analysis: y -> z
+        self.ha_net = nn.Sequential(
+            nn.Conv2d(latent_dim, hyper_dim, 3, stride=1, padding=1),
             nn.GroupNorm(8, hyper_dim),
             nn.GELU(),
             nn.Conv2d(hyper_dim, hyper_dim, 5, stride=2, padding=2),
