@@ -58,10 +58,11 @@ def run_hybrid_inference(image_path, model_path, threshold=50.0, device='cuda'):
     coder = HybridEntropyCoder()
     
     # 1. Load Image
-    if image_path.lower() == "random":
+    clean_path = image_path.strip().lower()
+    if clean_path == "random" or clean_path == "'random'" or clean_path == '"random"':
         image_path = find_random_image()
         if not image_path:
-            print("❌ Error: No images found in 'dataset' directory for random selection.")
+            print("❌ Error: No images found in 'dataset' directory. Ensure data is downloaded.")
             return
         print(f"🎲 Randomly selected: {image_path}")
 
