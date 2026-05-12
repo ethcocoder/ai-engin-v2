@@ -20,21 +20,13 @@ class HybridEntropyCoder:
 
     def compress(self, encoding, output_path):
         """
-        Compresses the hybrid encoding dictionary into a binary file.
-        
-        encoding = {
-            'grid': (rows, cols),
-            'decisions': (B, num_tiles),
-            'poly_coeffs': {idx: coeffs},
-            'neural_latents': {idx: {y_hat, y_step, z_hat, z_step, orig_h, orig_w}}
-        }
+        Compresses the vectorized hybrid encoding into a .bpox binary file.
         """
         grid = encoding['grid']
-        decisions = encoding['decisions'][0].cpu().numpy() # Assume batch size 1 for inference
+        decisions = encoding['decisions'][0].cpu().numpy() # (num_tiles,)
         num_tiles = len(decisions)
         
         # 1. Prepare Header
-        # Decision Map packed into a bit-field (supporting up to 32 tiles in 4 bytes)
         decision_map = 0
         for i, d in enumerate(decisions):
             if d > 0:
@@ -46,45 +38,54 @@ class HybridEntropyCoder:
         
         payload = bytearray()
         
-        # 2. Pack Tiles
+        # 2. Extract Data from Vectorized Encodings
+        poly_coeffs_all = encoding['poly_coeffs_all'][0].cpu().numpy() # (num_tiles, 3, 10)
+        
+        neural_data = encoding['neural_data']
+        neu_idx = 0 # Pointer into neural batch
+        
+        # 3. Pack Tiles Interleaved
         for i in range(num_tiles):
             if decisions[i] == 0:
-                # Math Tile: Pack 18 coefficients (3 channels * 6 coeffs)
-                coeffs = encoding['poly_coeffs'][i][0].cpu().numpy().astype(np.float32) # (3, 6)
+                # Math Tile: 10 coeffs * 3 channels = 30 floats
+                coeffs = poly_coeffs_all[i].astype(np.float32) # (3, 10)
                 payload.extend(coeffs.tobytes())
             else:
-                # Neural Tile: Use the Aether binary logic
-                lat = encoding['neural_latents'][i]
+                # Neural Tile: Extract from batch
+                if neural_data is None:
+                    continue
                 
-                # Convert latents to symbols
-                y_step = lat['y_step'].detach().cpu().view(1, -1, 1, 1).float()
-                y_symbols = torch.round(lat['y_hat'].detach().cpu().float() / torch.clamp(y_step, min=1e-6))
+                # Slice this tile's latents from the neural batch
+                y_hat = neural_data['metrics']['y_hat'][neu_idx:neu_idx+1]
+                y_step = neural_data['metrics']['y_step'][neu_idx:neu_idx+1]
+                
+                # Convert to symbols
+                y_symbols = torch.round(y_hat.detach().cpu().float() / torch.clamp(y_step.detach().cpu(), min=1e-6))
                 y_int = y_symbols.numpy().astype(np.int16)
+                y_step_np = y_step.detach().cpu().view(-1).numpy().astype(np.float32)
                 
-                z_int = None
+                # Optional hyperprior latents
+                z_blob = b""
                 z_step_np = None
-                if lat.get('z_hat') is not None:
-                    z_step = lat['z_step'].detach().cpu().view(1, -1, 1, 1).float()
-                    z_symbols = torch.round(lat['z_hat'].detach().cpu().float() / torch.clamp(z_step, min=1e-6))
-                    z_int = z_symbols.numpy().astype(np.int16)
-                    z_step_np = lat['z_step'].detach().cpu().view(-1).numpy().astype(np.float32)
-                
-                y_step_np = lat['y_step'].detach().cpu().view(-1).numpy().astype(np.float32)
-                
-                # Compress payloads
-                y_blob = zlib.compress(y_int.tobytes(), level=9)
-                z_blob = zlib.compress(z_int.tobytes(), level=9) if z_int is not None else b""
-                
-                # Pack neural header for this tile
-                # Shapes: b, cy, hy, wy, cz, hz, wz, orig_h, orig_w, len_y, len_z
-                b, cy, hy, wy = y_int.shape
                 cz, hz, wz = (0, 0, 0)
-                if z_int is not None:
-                    _, cz, hz, wz = z_int.shape
                 
+                if 'z_hat' in neural_data['metrics'] and neural_data['metrics']['z_hat'] is not None:
+                    z_hat = neural_data['metrics']['z_hat'][neu_idx:neu_idx+1]
+                    z_step = neural_data['metrics']['z_step'][neu_idx:neu_idx+1]
+                    z_symbols = torch.round(z_hat.detach().cpu().float() / torch.clamp(z_step.detach().cpu(), min=1e-6))
+                    z_int = z_symbols.numpy().astype(np.int16)
+                    z_step_np = z_step.detach().cpu().view(-1).numpy().astype(np.float32)
+                    _, cz, hz, wz = z_int.shape
+                    z_blob = zlib.compress(z_int.tobytes(), level=9)
+                
+                y_blob = zlib.compress(y_int.tobytes(), level=9)
+                
+                # Local Neural Header
+                b, cy, hy, wy = y_int.shape
+                # Use standard 160x160 for hybrid tiles (padded)
                 neural_header = struct.pack(">IIIIIIIII II", 
                                           b, cy, hy, wy, cz, hz, wz, 
-                                          lat['orig_h'], lat['orig_w'],
+                                          160, 160,
                                           len(y_blob), len(z_blob))
                 
                 payload.extend(neural_header)
@@ -93,8 +94,10 @@ class HybridEntropyCoder:
                     payload.extend(z_step_np.tobytes())
                 payload.extend(y_blob)
                 payload.extend(z_blob)
+                
+                neu_idx += 1
         
-        # 3. Write File
+        # 4. Write File
         with open(output_path, 'wb') as f:
             f.write(header)
             f.write(payload)
@@ -103,79 +106,76 @@ class HybridEntropyCoder:
 
     def decompress(self, input_path, device='cuda'):
         """
-        Reconstructs the hybrid encoding from a binary file.
+        Reconstructs the vectorized hybrid encoding from a .bpox file.
         """
         with open(input_path, 'rb') as f:
-            # 1. Read Header
             header_size = struct.calcsize(">4sIIIII")
             header_data = f.read(header_size)
             magic, ver, rows, cols, num_tiles, decision_map = struct.unpack(">4sIIIII", header_data)
-            
-            if magic != self.magic_bytes:
-                raise ValueError("Invalid Blueprint file signature")
             
             decisions = []
             for i in range(num_tiles):
                 decisions.append(1 if (decision_map & (1 << i)) else 0)
             
             decisions_t = torch.tensor([decisions], device=device)
+            poly_coeffs_all = torch.zeros(1, num_tiles, 3, 10, device=device)
             
-            poly_coeffs = {}
-            neural_latents = {}
+            y_hat_list = []
+            y_step_list = []
+            z_hat_list = []
+            z_step_list = []
+            complex_mask = []
             
-            # 2. Unpack Tiles
             for i in range(num_tiles):
                 if decisions[i] == 0:
-                    # Math Tile: 18 floats
-                    coeff_data = f.read(18 * 4)
-                    coeffs = np.frombuffer(coeff_data, dtype=np.float32).reshape(1, 3, 6)
-                    poly_coeffs[i] = torch.from_numpy(coeffs).to(device)
+                    # Math: 30 floats
+                    coeff_data = f.read(30 * 4)
+                    coeffs = np.frombuffer(coeff_data, dtype=np.float32).reshape(3, 10)
+                    poly_coeffs_all[0, i] = torch.from_numpy(coeffs).to(device)
+                    complex_mask.append(False)
                 else:
-                    # Neural Tile
+                    # Neural
                     n_header_size = struct.calcsize(">IIIIIIIII II")
                     n_header_data = f.read(n_header_size)
-                    b, cy, hy, wy, cz, hz, wz, orig_h, orig_w, len_y, len_z = struct.unpack(">IIIIIIIII II", n_header_data)
+                    b, cy, hy, wy, cz, hz, wz, oh, ow, len_y, len_z = struct.unpack(">IIIIIIIII II", n_header_data)
                     
-                    y_step_data = f.read(cy * 4)
-                    y_step_arr = np.frombuffer(y_step_data, dtype=np.float32)
-                    
+                    y_step_arr = np.frombuffer(f.read(cy * 4), dtype=np.float32)
                     z_step_arr = None
                     if cz > 0:
-                        z_step_data = f.read(cz * 4)
-                        z_step_arr = np.frombuffer(z_step_data, dtype=np.float32)
+                        z_step_arr = np.frombuffer(f.read(cz * 4), dtype=np.float32)
                     
                     y_blob = f.read(len_y)
                     z_blob = f.read(len_z)
                     
-                    y_int_data = zlib.decompress(y_blob)
-                    y_int = np.frombuffer(y_int_data, dtype=np.int16).reshape(b, cy, hy, wy)
+                    y_int = np.frombuffer(zlib.decompress(y_blob), dtype=np.int16).reshape(b, cy, hy, wy)
+                    y_hat_t = torch.from_numpy(y_int.copy()).float().to(device) * torch.from_numpy(y_step_arr).to(device).view(1, -1, 1, 1)
+                    y_hat_list.append(y_hat_t)
+                    y_step_list.append(torch.from_numpy(y_step_arr).to(device).view(1, -1, 1, 1))
                     
-                    z_hat_t = None
-                    z_step_t = None
                     if len_z > 0:
-                        z_int_data = zlib.decompress(z_blob)
-                        z_int = np.frombuffer(z_int_data, dtype=np.int16).reshape(b, cz, hz, wz)
-                        z_symbols = torch.from_numpy(z_int.copy()).float().to(device)
-                        z_step_t = torch.from_numpy(z_step_arr.copy()).to(device).view(1, -1, 1, 1)
-                        z_hat_t = z_symbols * z_step_t
+                        z_int = np.frombuffer(zlib.decompress(z_blob), dtype=np.int16).reshape(b, cz, hz, wz)
+                        z_hat_t = torch.from_numpy(z_int.copy()).float().to(device) * torch.from_numpy(z_step_arr).to(device).view(1, -1, 1, 1)
+                        z_hat_list.append(z_hat_t)
+                        z_step_list.append(torch.from_numpy(z_step_arr).to(device).view(1, -1, 1, 1))
                     
-                    y_symbols = torch.from_numpy(y_int.copy()).float().to(device)
-                    y_step_t = torch.from_numpy(y_step_arr.copy()).to(device).view(1, -1, 1, 1)
-                    y_hat_t = y_symbols * y_step_t
-                    
-                    neural_latents[i] = {
-                        'y_hat': y_hat_t,
-                        'y_step': y_step_t,
-                        'z_hat': z_hat_t,
-                        'z_step': z_step_t,
-                        'orig_h': orig_h,
-                        'orig_w': orig_w
-                    }
-                    
+                    complex_mask.append(True)
+            
+            neural_data = None
+            if any(complex_mask):
+                neural_data = {
+                    'metrics': {
+                        'y_hat': torch.cat(y_hat_list, dim=0),
+                        'y_step': torch.cat(y_step_list, dim=0),
+                        'z_hat': torch.cat(z_hat_list, dim=0) if z_hat_list else None,
+                        'z_step': torch.cat(z_step_list, dim=0) if z_step_list else None,
+                    },
+                    'mask': torch.tensor(complex_mask, device=device)
+                }
+                
         return {
             'grid': (rows, cols),
             'decisions': decisions_t,
-            'poly_coeffs': poly_coeffs,
-            'neural_latents': neural_latents,
+            'poly_coeffs_all': poly_coeffs_all,
+            'neural_data': neural_data,
             'num_tiles': num_tiles
         }
