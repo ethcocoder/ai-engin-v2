@@ -27,6 +27,9 @@ def run_inference(image_path, model_path, device='cuda'):
     Elite Inference Pipeline for AetherCodec-Elite.
     Simulates a real-world P2P transmission:
     Sender -> Encode -> Quantize -> .padox Binary -> Receiver -> Decompress -> Decode.
+    
+    CRITICAL FIX v6: Properly uses the fixed entropy coder with
+    correct quantize-before-serialize pipeline.
     """
     if not torch.cuda.is_available():
         device = 'cpu'
@@ -62,8 +65,14 @@ def run_inference(image_path, model_path, device='cuda'):
     if not os.path.exists(image_path):
         print(f"❌ Error: Image {image_path} not found. Generating dummy...")
         x = torch.randn(1, 3, 512, 512).to(device)
+        H, W = 512, 512
     else:
         img = Image.open(image_path).convert('RGB')
+        
+        # Report original file size
+        original_size = os.path.getsize(image_path)
+        print(f"📁 Original image: {image_path} ({original_size/1024:.1f} KB, {img.size[0]}x{img.size[1]})")
+        
         transform = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
@@ -86,18 +95,25 @@ def run_inference(image_path, model_path, device='cuda'):
         print("📤 Encoding...")
         t0 = time.perf_counter()
         
-        # Expert Encode
-        y, _ = model.encoder(x_padded, return_skips=True)
+        # Expert Encode (no skips for P2P honesty)
+        y, _ = model.encoder(x_padded, return_skips=False)
         
-        # Sovereign Quantization
-        y_hat, y_step = model.y_quantizer(y, hard_prob=1.0)
+        # Sovereign Quantization (hard mode for inference)
+        y_hat, y_step = model.y_quantizer(y, force_hard=True)
         
         # Hyperprior Analysis (On quantized y_hat for honesty)
         z_hat = torch.zeros(1, 1, 1, 1).to(device)
-        z_step = torch.ones(1, 1, 1, 1).to(device)
+        z_step = torch.ones(1).to(device)
         
         if model.use_hyperprior:
             z_hat, z_step, _ = model.hyperprior(y_hat, hard_prob=1.0)
+        
+        # Report latent statistics
+        print(f"   Latent y_hat: shape={list(y_hat.shape)}, "
+              f"range=[{y_hat.min():.2f}, {y_hat.max():.2f}], "
+              f"step_mean={y_step.mean():.3f}")
+        print(f"   Latent z_hat: shape={list(z_hat.shape)}, "
+              f"range=[{z_hat.min():.2f}, {z_hat.max():.2f}]")
         
         # Binary Compression
         file_path = "output.padox"
@@ -110,6 +126,10 @@ def run_inference(image_path, model_path, device='cuda'):
         
         # Honest Decompression (Reads metadata from .padox)
         y_recon, z_recon, y_step_recv, z_step_recv = coder.decompress(file_path, device=device)
+        
+        # Verify reconstruction fidelity
+        recon_error = (y_hat - y_recon).abs().max().item()
+        print(f"   Latent reconstruction error: {recon_error:.6f}")
         
         # Synthesis (Skips=None for true P2P simulation)
         x_hat_padded = model.decoder(y_recon, encoder_skips=None)
@@ -125,17 +145,28 @@ def run_inference(image_path, model_path, device='cuda'):
     p_val = psnr(x, x_hat, data_range=2.0)
     m_val = ms_ssim(x, x_hat, data_range=2.0)
     
-    print(f"\n" + "="*40)
+    # Compression ratio
+    if os.path.exists(image_path):
+        compression_ratio = original_size / file_size if file_size > 0 else 0
+    else:
+        compression_ratio = 0
+    
+    print(f"\n" + "="*50)
     print(f"📊 ELITE INFERENCE RESULTS")
-    print(f"="*40)
-    print(f"  Source     : {image_path}")
-    print(f"  File Size  : {file_size/1024:.2f} KB")
-    print(f"  Send Time  : {t_send*1000:.1f} ms")
-    print(f"  Recv Time  : {t_recv*1000:.1f} ms")
-    print(f"  PSNR       : {p_val:.2f} dB")
-    print(f"  MS-SSIM    : {m_val:.4f}")
-    print(f"  VRAM Used  : {vram1 - vram0:.1f} MB")
-    print(f"="*40 + "\n")
+    print(f"="*50)
+    print(f"  Source        : {image_path}")
+    if os.path.exists(image_path):
+        print(f"  Original Size : {original_size/1024:.2f} KB")
+    print(f"  .padox Size   : {file_size/1024:.2f} KB")
+    if compression_ratio > 0:
+        print(f"  Compression   : {compression_ratio:.1f}x ({100*(1-1/compression_ratio):.1f}% reduction)")
+    print(f"  Send Time     : {t_send*1000:.1f} ms")
+    print(f"  Recv Time     : {t_recv*1000:.1f} ms")
+    print(f"  PSNR          : {p_val:.2f} dB")
+    print(f"  MS-SSIM       : {m_val:.4f}")
+    print(f"  VRAM Used     : {vram1 - vram0:.1f} MB")
+    print(f"  Recon Error   : {recon_error:.6f}")
+    print(f"="*50 + "\n")
     
     # Save Result
     out_img = x_hat.clamp(-1, 1)
@@ -145,7 +176,7 @@ def run_inference(image_path, model_path, device='cuda'):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Elite AetherCodec Inference")
     parser.add_argument("--image", type=str, default="test.jpg", help="Path to input image")
-    parser.add_argument("--model", type=str, default="stage3_elite_final.pth", help="Path to model weights")
+    parser.add_argument("--model", type=str, default="stage1_foundation.pth", help="Path to model weights")
     parser.add_argument("--device", type=str, default="cuda", help="Device (cuda/cpu)")
     args = parser.parse_args()
     

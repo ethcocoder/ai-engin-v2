@@ -14,7 +14,7 @@ from src.loss.rate_distortion import RateDistortionLoss
 from src.model.qvs_flow import invalidate_qvs_cache
 from src.utils.ema import EMA
 
-def train_stage2(model, dataloader, epochs=100, device='cuda', ema=None):
+def train_stage2(model, dataloader, epochs=100, device='cuda', ema=None, lmbda=0.05):
     """
     Stage 2: Switch distortion to MS-SSIM. lambda=0.05. 
     Freeze hyperprior, train main codec.
@@ -29,7 +29,7 @@ def train_stage2(model, dataloader, epochs=100, device='cuda', ema=None):
         for param in model.hyperprior.parameters():
             param.requires_grad = True
             
-    criterion = RateDistortionLoss(lmbda=0.05, use_ms_ssim=True, use_lpips=True, use_entanglement=True, total_epochs=epochs, lpips_warmup_epochs=5, rate_warmup_pct=0.0).to(device)
+    criterion = RateDistortionLoss(lmbda=lmbda, use_ms_ssim=True, use_lpips=True, use_entanglement=True, total_epochs=epochs, lpips_warmup_epochs=5, rate_warmup_pct=0.0, max_bpp=4.0).to(device)
     
     # Train only main codec parameters (encoder, decoder, quantizer)
     params_to_train = [p for n, p in model.named_parameters() if p.requires_grad]

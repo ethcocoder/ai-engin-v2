@@ -14,10 +14,15 @@ from src.model.qvs_flow import invalidate_qvs_cache
 from src.loss.rate_distortion import RateDistortionLoss
 from src.utils.ema import EMA
 
-def train_stage1(model, dataloader, epochs=100, device='cuda'):
+def train_stage1(model, dataloader, epochs=100, device='cuda', lmbda=0.01):
     """
-    Stage 1: Train only encoder+decoder+hyperprior. 
-    Loss: R + lambda*MSE. lambda=0.01.
+    Stage 1: Foundation Training — Encoder + Decoder + Hyperprior.
+    
+    CRITICAL FIX v6: Proper compression training.
+    - lambda=0.01 for aggressive compression (small files)
+    - lambda=0.05 for balanced quality/size
+    - Rate warmup is SHORT (10%) to start compressing immediately
+    - Hard quantization curriculum ramps faster
     """
     model.to(device)
     model.train()
@@ -25,10 +30,18 @@ def train_stage1(model, dataloader, epochs=100, device='cuda'):
     # FIX 8: Freeze RRN for Stage 1 (let foundation learn first)
     for p in model.decoder.rrn.parameters():
         p.requires_grad = False
-        
-    criterion = RateDistortionLoss(lmbda=0.01, use_ms_ssim=False, use_lpips=False, use_entanglement=True, total_epochs=epochs).to(device)
+    
+    # CRITICAL FIX v6: rate_warmup_pct=0.1 (was 0.3) for fast compression
+    criterion = RateDistortionLoss(
+        lmbda=lmbda,
+        use_ms_ssim=False, 
+        use_lpips=False, 
+        use_entanglement=True, 
+        total_epochs=epochs,
+        rate_warmup_pct=0.1  # Only 10% warmup — rate kicks in fast
+    ).to(device)
+    
     # ELITE ACCURACY: OneCycleLR for faster convergence and better optima
-    # Peak at 1e-4, then settle at 1e-6
     optimizer = AdamW(model.parameters(), lr=1e-4, betas=(0.9, 0.999), weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.OneCycleLR(
         optimizer, max_lr=1e-4, 
@@ -41,10 +54,14 @@ def train_stage1(model, dataloader, epochs=100, device='cuda'):
     scaler = GradScaler('cuda')
     ema = EMA(model, decay=0.999)
         
-    print(f"Starting Stage 1 Training for {epochs} epochs...")
+    print(f"Starting Stage 1 Training for {epochs} epochs (lambda={lmbda})...")
+    print(f"  Lambda={lmbda}: {'Aggressive compression' if lmbda <= 0.01 else 'Balanced' if lmbda <= 0.05 else 'High quality'}")
     
     for epoch in range(epochs):
         epoch_loss = 0.0
+        epoch_bpp = 0.0
+        epoch_distortion = 0.0
+        
         # FIX: Synchronize loss engine with current epoch for warmups
         criterion.set_epoch(epoch)
         
@@ -55,8 +72,11 @@ def train_stage1(model, dataloader, epochs=100, device='cuda'):
             
             optimizer.zero_grad()
             
-            # FIX 5: Quantization Curriculum
-            hard_prob = min(1.0, max(0.0, (epoch - epochs*0.5) / (epochs*0.3 + 1e-6)))
+            # CRITICAL FIX v6: Faster quantization curriculum
+            # Start hard quantization earlier so the model learns to work with
+            # actual quantized values, not just noise-perturbed ones
+            # Ramp from 0→1 over epochs 20%-70% of training
+            hard_prob = min(1.0, max(0.0, (epoch - epochs*0.2) / (epochs*0.5 + 1e-6)))
             
             with autocast('cuda'):
                 x_hat, likelihoods, metrics = model(x, hard_prob=hard_prob)
@@ -88,20 +108,31 @@ def train_stage1(model, dataloader, epochs=100, device='cuda'):
             ema.update(model)
             
             epoch_loss += loss.item()
+            epoch_bpp += loss_dict['bpp_loss']
+            epoch_distortion += loss_dict['d_loss']
             
             if batch_idx % 10 == 0:
                 # Show rate_weight so user can verify warmup progress
-                warmup_end = max(1, int(epochs * 0.3))
-                rw = min(1.0, 0.01 + 0.99 * (epoch / warmup_end)) if epoch < warmup_end else 1.0
+                warmup_end = max(1, int(epochs * 0.1))
+                rw = min(1.0, 0.1 + 0.9 * (epoch / warmup_end)) if epoch < warmup_end else 1.0
+                
+                # Show step_size stats for compression monitoring
+                y_step_mean = model.y_quantizer.step_size.data.mean().item()
+                
                 pbar.set_postfix({
                     "loss": f"{loss.item():.4f}",
-                    "bpp": f"{loss_dict['bpp_loss']:.4f}",
-                    "mse": f"{loss_dict['d_loss']:.4f}",
+                    "bpp": f"{loss_dict['bpp_loss']:.3f}",
+                    "dist": f"{loss_dict['d_loss']:.4f}",
+                    "step": f"{y_step_mean:.2f}",
                     "rw": f"{rw:.2f}",
+                    "hq": f"{hard_prob:.2f}",
                     "lr": f"{optimizer.param_groups[0]['lr']:.2e}"
                 })
                 
-        print(f"Epoch {epoch+1} Completed. Avg Loss: {epoch_loss/len(dataloader):.4f}")
+        avg_loss = epoch_loss / len(dataloader)
+        avg_bpp = epoch_bpp / len(dataloader)
+        avg_dist = epoch_distortion / len(dataloader)
+        print(f"Epoch {epoch+1} | Loss: {avg_loss:.4f} | BPP: {avg_bpp:.3f} | Distortion: {avg_dist:.4f}")
         
         # --- Checkpoint Saving ---
         checkpoint = {
@@ -128,8 +159,9 @@ if __name__ == "__main__":
     import torch
     
     parser = argparse.ArgumentParser(description="Train AetherCodec Stage 1")
-    parser.add_argument("--epochs", type=int, default=50, help="Number of training epochs")
+    parser.add_argument("--epochs", type=int, default=50, help="Number of training epochs (minimum 50 recommended)")
     parser.add_argument("--batch_size", type=int, default=8, help="Batch size")
+    parser.add_argument("--lmbda", type=float, default=0.01, help="Lambda: 0.001=extreme compression, 0.01=aggressive, 0.05=balanced, 0.1=high quality")
     parser.add_argument("--data_dir", type=str, default="auto", help="Path to dataset (or 'auto' to download)")
     parser.add_argument("--no_clic", action="store_true", help="Disable CLIC 2020 dataset")
     parser.add_argument("--no_massive", action="store_true", help="Disable COCO + Flickr massive corpus")
@@ -137,7 +169,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     print(f"Initializing AetherCodec Stage 1 Training...")
-    print(f"Epochs: {args.epochs}, Batch Size: {args.batch_size}, Data: {args.data_dir}")
+    print(f"Epochs: {args.epochs}, Batch Size: {args.batch_size}, Lambda: {args.lmbda}")
     print(f"Dataset Config: Massive={'Disabled' if args.no_massive else 'Enabled'}, CLIC={'Disabled' if args.no_clic else 'Enabled'}, Flickr2K={'Enabled' if args.use_flickr2k else 'Disabled'}")
     
     model = AetherCodec()
@@ -154,7 +186,7 @@ if __name__ == "__main__":
         use_10k_plus=not args.no_massive
     )
     
-    model, ema = train_stage1(model, loader, epochs=args.epochs)
+    model, ema = train_stage1(model, loader, epochs=args.epochs, lmbda=args.lmbda)
     
     torch.save(model.state_dict(), 'stage1_foundation.pth')
     print("Stage 1 complete and saved to 'stage1_foundation.pth'")

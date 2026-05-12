@@ -10,14 +10,26 @@ from ..utils.metrics import ms_ssim
 class RateDistortionLoss(nn.Module):
     """
     Elite Rate-Distortion Loss Engine.
-    L = lambda * (L1 + MS-SSIM + LPIPS) + Rate + lambda * (Quantum + Sparsity)
+    L = lambda * Distortion + Rate + Regularization
     
-    Professionally balanced for stable training and high perceptual fidelity.
+    CRITICAL FIX v6: Corrected Rate-Distortion balance.
+    
+    In learned image compression:
+    - Higher lambda = prioritize QUALITY (more bits, better image)
+    - Lower lambda  = prioritize COMPRESSION (fewer bits, smaller file)
+    
+    The formula is: L = lambda * D + R
+    Where R (rate/bpp) is NOT scaled by lambda, so it always has full pressure.
+    Lambda controls HOW MUCH we care about quality vs compression.
+    
+    For extreme compression (2MB → 4KB), use lambda=0.001-0.01.
+    For balanced quality, use lambda=0.01-0.05.
+    For high quality, use lambda=0.05-0.5.
     """
     def __init__(self, lmbda=0.01, use_ms_ssim=False, use_lpips=False, 
                  use_entanglement=False, entanglement_weight=0.01,
                  lpips_weight=0.1, lpips_warmup_epochs=10,
-                 max_bpp=2.0, total_epochs=40, rate_warmup_pct=0.3):
+                 max_bpp=4.0, total_epochs=40, rate_warmup_pct=0.1):
         super().__init__()
         self.lmbda = lmbda
         self.use_ms_ssim = use_ms_ssim
@@ -58,12 +70,13 @@ class RateDistortionLoss(nn.Module):
         N, _, H, W = x.shape
         num_pixels = N * H * W
         
-        # FIX 7: Rate warmup — let the encoder/decoder learn to reconstruct
-        # before the entropy model starts pulling the latent distribution.
-        # Scale rate weight from 0.01 → 1.0 over the first 30% of training.
+        # CRITICAL FIX v6: Shortened warmup for short training runs.
+        # For 10-epoch runs, 30% warmup = 3 epochs wasted.
+        # Now: 10% warmup so rate kicks in almost immediately.
         warmup_end = max(1, int(self.total_epochs * self.rate_warmup_pct))
         if self.current_epoch < warmup_end:
-            rate_weight = 0.01 + 0.99 * (self.current_epoch / warmup_end)
+            # Faster ramp: start at 0.1 instead of 0.01
+            rate_weight = 0.1 + 0.9 * (self.current_epoch / warmup_end)
         else:
             rate_weight = 1.0
         
@@ -73,7 +86,7 @@ class RateDistortionLoss(nn.Module):
             # ELITE FIX: Numerically stable rate computation (-log2(p) = -ln(p)/ln(2))
             # No explicit clamping; epsilon inside log for stability.
             bpp = -torch.log(likelihood + 1e-10).sum() / (num_pixels * math.log(2))
-            # FIX 5: Cap max bpp per component for stability
+            # Cap max bpp per component for stability
             bpp = torch.clamp(bpp, max=self.max_bpp)
             bpp_loss += bpp
             
@@ -81,7 +94,7 @@ class RateDistortionLoss(nn.Module):
         l1_val = self.l1_loss(x, x_hat)
         d_loss = l1_val
         
-        # MS-SSIM (FIX 2: Range awareness)
+        # MS-SSIM (Range awareness)
         ms_ssim_val = None
         if self.use_ms_ssim:
             x_norm = self._normalize_for_ssim(x)
@@ -89,7 +102,7 @@ class RateDistortionLoss(nn.Module):
             ms_ssim_val = ms_ssim(x_norm, x_hat_norm, data_range=1.0)
             d_loss += 0.5 * (1.0 - ms_ssim_val)
             
-        # LPIPS (FIX 3: Warmup schedule)
+        # LPIPS (Warmup schedule)
         lpips_val = None
         if self.use_lpips and self.current_epoch >= self.lpips_warmup_epochs:
             lpips_val = self.lpips_loss(x, x_hat)
@@ -109,11 +122,12 @@ class RateDistortionLoss(nn.Module):
             spa_val = self.sparsity_reg(y)
             reg_loss = ent_val + spa_val
             
-        # FIX 4: Scale distortion and regularization by lambda to maintain priority balance
-        # FIX 7: Apply rate_weight to prevent bpp from dominating early training
+        # CRITICAL FIX v6: Proper R-D balance
+        # L = lambda * D + R  (standard learned compression formula)
+        # Rate is always at full weight after warmup. Lambda controls quality priority.
         total_loss = self.lmbda * d_loss + rate_weight * bpp_loss + self.lmbda * reg_loss
         
-        # FIX 6: Comprehensive Metrics Return
+        # Comprehensive Metrics Return
         return {
             'loss': total_loss,
             'bpp_loss': bpp_loss.item() if isinstance(bpp_loss, torch.Tensor) else bpp_loss,

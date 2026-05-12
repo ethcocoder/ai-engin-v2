@@ -17,7 +17,7 @@ from src.model.discriminator import MultiScaleDiscriminator
 from src.model.qvs_flow import invalidate_qvs_cache
 from src.utils.ema import EMA
 
-def train_stage3(model, dataloader, epochs=50, device='cuda', ema=None):
+def train_stage3(model, dataloader, epochs=50, device='cuda', ema=None, lmbda=0.1):
     """
     Stage 3: Elite Adversarial Training.
     Utilizes the expert-audited AdversarialLoss for maximum visual fidelity.
@@ -33,7 +33,7 @@ def train_stage3(model, dataloader, epochs=50, device='cuda', ema=None):
     discriminator.train()
     
     # Loss Engines
-    criterion = RateDistortionLoss(lmbda=0.1, use_ms_ssim=True, use_lpips=True, use_entanglement=True).to(device)
+    criterion = RateDistortionLoss(lmbda=lmbda, use_ms_ssim=True, use_lpips=True, use_entanglement=True, max_bpp=4.0).to(device)
     adv_criterion = AdversarialLoss(lambda_fm=10.0).to(device)
     
     opt_G = AdamW(model.parameters(), lr=1e-4, betas=(0.5, 0.9), weight_decay=1e-4)

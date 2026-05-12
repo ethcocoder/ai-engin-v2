@@ -24,11 +24,13 @@ class DSQQuantize(torch.autograd.Function):
         return grad_y, grad_step
 
 class SovereignQuantizer(nn.Module):
-    def __init__(self, channels, max_step=2.0):
+    def __init__(self, channels, max_step=8.0):
         super().__init__()
         self.channels = channels
         self.max_step = max_step
-        self.step_size = nn.Parameter(torch.ones(channels) * 0.1)
+        # CRITICAL FIX: Step=1.0 gives ~20 bins/channel (low entropy = small files)
+        # Old step=0.1 gave ~200 bins/channel (high entropy = bloated files)
+        self.step_size = nn.Parameter(torch.ones(channels) * 1.0)
     
     def forward(self, x, force_hard=False, hard_prob=0.0):
         step_size = torch.clamp(self.step_size, min=1e-4, max=self.max_step)
