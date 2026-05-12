@@ -43,7 +43,7 @@ class LPIPSLoss(nn.Module):
         self.layers = [1, 4, 7, 9, 11]
         self.layer_channels = [64, 192, 384, 256, 256]
         
-        # FIX 1: Learned 1x1 scaling layers to calibrate perceptual distance
+        # Learned 1x1 scaling layers to calibrate perceptual distance
         self.scaling_layers = nn.ModuleList([
             nn.Conv2d(ch, 1, 1, bias=False) for ch in self.layer_channels
         ]).to(device)
@@ -52,7 +52,7 @@ class LPIPSLoss(nn.Module):
         for layer in self.scaling_layers:
             nn.init.normal_(layer.weight, std=0.01)
         
-        # FIX 3: ImageNet normalization buffers
+        # ImageNet normalization buffers
         self.register_buffer('mean', torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
         self.register_buffer('std', torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
     
@@ -81,7 +81,7 @@ class LPIPSLoss(nn.Module):
             y_feat = layer(y_feat)
             
             if i in self.layers:
-                # FIX 4: Downsample high-res features to save memory and match receptive fields
+                # Downsample high-res features to save memory
                 if x_feat.shape[2] > 64:
                     x_p = F.adaptive_avg_pool2d(x_feat, 64)
                     y_p = F.adaptive_avg_pool2d(y_feat, 64)
@@ -92,7 +92,7 @@ class LPIPSLoss(nn.Module):
                 x_scaled = self.scaling_layers[layer_idx](x_p)
                 y_scaled = self.scaling_layers[layer_idx](y_p)
                 
-                # FIX 7: Spatially averaged, channel-summed squared difference
+                # Spatially averaged, channel-summed squared difference
                 diff = (x_scaled - y_scaled) ** 2
                 loss += diff.mean(dim=(2, 3)).sum(dim=1).mean()
                 

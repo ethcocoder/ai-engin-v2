@@ -18,8 +18,7 @@ class BlurPoolDownsample(nn.Module):
         self.act = nn.GELU()
     
     def forward(self, x):
-        x = self.blur(x)
-        return self.act(self.norm(self.conv(x)))
+        return self.act(self.norm(self.conv(self.blur(x))))
 
 class ResidualBlock(nn.Module):
     def __init__(self, in_ch, out_ch, drop_path_rate=0.0):
@@ -162,6 +161,6 @@ class AnalysisTransform(nn.Module):
         x = self.swin_blocks(x)
         
         if return_skips:
-            # FIX 7: Reverse order for decoder [H/16, H/8, H/4, H/2]
+            # Reverse order for decoder: [H/16, H/8, H/4, H/2]
             return x, skips[::-1]
         return x, None

@@ -16,14 +16,12 @@ class MaskedConv2d(nn.Conv2d):
 
     def create_mask(self):
         k = self.kernel_size[0]
-        # FIX 3: Strict causal mask validation
+        # Strict causal mask validation
         self.mask[:, :, :k//2, :] = 1
         self.mask[:, :, k//2, :k//2] = 1
 
     def forward(self, x):
-        # FIX 3: Ensure mask is always applied correctly
-        masked_weight = self.weight * self.mask
-        return F.conv2d(x, masked_weight, self.bias, self.stride,
+        return F.conv2d(x, self.weight * self.mask, self.bias, self.stride,
                         self.padding, self.dilation, self.groups)
 
 class Hyperprior(nn.Module):
@@ -39,9 +37,6 @@ class Hyperprior(nn.Module):
         self.num_components = num_components
         
         # Hyper-analysis: y -> z
-        # FIX 6: Added GroupNorm for internal covariate stability
-        self.ha_net = nn.Sequential(
-            nn.Conv2d(latent_dim, hyper_dim, 3, stride=1, padding=1),
             nn.GroupNorm(8, hyper_dim),
             nn.GELU(),
             nn.Conv2d(hyper_dim, hyper_dim, 5, stride=2, padding=2),
@@ -128,8 +123,7 @@ class Hyperprior(nn.Module):
         weights = params[:, :, :, 0]
         means = params[:, :, :, 1]
         
-        # ELITE ACCURACY FIX: Softplus for scale activation
-        # Softplus is more stable than exp and prevents gradient explosions (NaNs)
+        # Softplus for scale activation (stability)
         scales = F.softplus(params[:, :, :, 2]) * 0.1 + 1e-6
         
         # FIX 5: Soft GMM temperature (1.0) for Lockdown Build stability

@@ -15,7 +15,7 @@ class QVSUnitaryCoupling(nn.Module):
         # Skew-symmetric matrix parameters: A = A_params - A_params^T
         self.A_params = nn.Parameter(torch.randn(channels, channels) * 0.01)
         
-        # FIX 1: Cached orthogonal matrix to prevent redundant O(C^3) inversions
+        # Cached orthogonal matrix to prevent redundant O(C^3) inversions
         self.register_buffer('_W_cache', torch.eye(channels))
         self._cache_valid = False
     
@@ -24,7 +24,7 @@ class QVSUnitaryCoupling(nn.Module):
         Compute W = (I - A)(I + A)^-1.
         This transform maps a skew-symmetric matrix A to an orthogonal matrix W.
         """
-        # FIX 2: Clamp A_params to prevent ill-conditioning/instability
+        # Clamp A_params to prevent ill-conditioning/instability
         A_clamped = torch.clamp(self.A_params, -self.max_A_norm, self.max_A_norm)
         A = A_clamped - A_clamped.t()
         
@@ -46,7 +46,7 @@ class QVSUnitaryCoupling(nn.Module):
         """
         if not self._cache_valid or self.training:
             W = self._compute_orthogonal_matrix()
-            # FIX 1: Cache the result for inference speed
+            # Cache the result for inference speed
             self._W_cache = W.detach().clone()
             self._cache_valid = True
             return W
@@ -63,7 +63,7 @@ class QVSUnitaryCoupling(nn.Module):
         """
         W = self.get_orthogonal_matrix()
         
-        # ELITE DEBUG: Verify orthogonality drift during training (1% frequency)
+        # Verify orthogonality drift during training (1% frequency)
         if self.training and torch.rand(1).item() < 0.01:
             with torch.no_grad():
                 I = torch.eye(self.channels, device=W.device)

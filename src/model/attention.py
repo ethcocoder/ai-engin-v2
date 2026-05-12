@@ -22,7 +22,7 @@ class WindowAttention(nn.Module):
         self.proj_dropout = nn.Dropout(dropout)
         self.attn_dropout = nn.Dropout(dropout)
         
-        # FIX 1: Relative position bias table
+        # Relative position bias table
         self.relative_position_bias_table = nn.Parameter(
             torch.zeros((2 * window_size - 1) ** 2, num_heads)
         )
@@ -106,7 +106,7 @@ class WindowAttention(nn.Module):
         # Attention Calculation
         attn = (q @ k.transpose(-2, -1)) * self.scale
         
-        # FIX 1: Add relative position bias
+        # Add relative position bias
         relative_position_bias = self.relative_position_bias_table[
             self.relative_position_index.view(-1)
         ].view(
@@ -115,7 +115,7 @@ class WindowAttention(nn.Module):
         relative_position_bias = relative_position_bias.permute(2, 0, 1).contiguous()
         attn = attn + relative_position_bias.unsqueeze(0)
         
-        # FIX 2: Dynamic shifted window mask based on H, W
+        # Dynamic shifted window mask based on H, W
         if self.shift_size > 0:
             # Check if cached mask is still valid for current resolution
             if not hasattr(self, 'cached_mask') or self.cached_mask.shape[0] != (Hp // self.window_size * Wp // self.window_size):

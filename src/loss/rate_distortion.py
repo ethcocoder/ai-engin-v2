@@ -12,19 +12,13 @@ class RateDistortionLoss(nn.Module):
     Elite Rate-Distortion Loss Engine.
     L = lambda * Distortion + Rate + Regularization
     
-    CRITICAL FIX v6: Corrected Rate-Distortion balance.
-    
     In learned image compression:
     - Higher lambda = prioritize QUALITY (more bits, better image)
     - Lower lambda  = prioritize COMPRESSION (fewer bits, smaller file)
     
     The formula is: L = lambda * D + R
     Where R (rate/bpp) is NOT scaled by lambda, so it always has full pressure.
-    Lambda controls HOW MUCH we care about quality vs compression.
-    
-    For extreme compression (2MB → 4KB), use lambda=0.001-0.01.
-    For balanced quality, use lambda=0.01-0.05.
-    For high quality, use lambda=0.05-0.5.
+    Lambda controls quality vs compression priority.
     """
     def __init__(self, lmbda=0.01, use_ms_ssim=False, use_lpips=False, 
                  use_entanglement=False, entanglement_weight=0.01,
@@ -70,9 +64,7 @@ class RateDistortionLoss(nn.Module):
         N, _, H, W = x.shape
         num_pixels = N * H * W
         
-        # CRITICAL FIX v6: Shortened warmup for short training runs.
-        # For 10-epoch runs, 30% warmup = 3 epochs wasted.
-        # Now: 10% warmup so rate kicks in almost immediately.
+        # Shortened warmup for shorter training runs.
         warmup_end = max(1, int(self.total_epochs * self.rate_warmup_pct))
         if self.current_epoch < warmup_end:
             # Faster ramp: start at 0.1 instead of 0.01
@@ -83,8 +75,7 @@ class RateDistortionLoss(nn.Module):
         # 1. Rate (Bits Per Pixel)
         bpp_loss = 0.0
         for likelihood in likelihoods.values():
-            # ELITE FIX: Numerically stable rate computation (-log2(p) = -ln(p)/ln(2))
-            # No explicit clamping; epsilon inside log for stability.
+            # Numerically stable rate computation (-log2(p) = -ln(p)/ln(2))
             bpp = -torch.log(likelihood + 1e-10).sum() / (num_pixels * math.log(2))
             # Cap max bpp per component for stability
             bpp = torch.clamp(bpp, max=self.max_bpp)
@@ -122,7 +113,6 @@ class RateDistortionLoss(nn.Module):
             spa_val = self.sparsity_reg(y)
             reg_loss = ent_val + spa_val
             
-        # CRITICAL FIX v6: Proper R-D balance
         # L = lambda * D + R  (standard learned compression formula)
         # Rate is always at full weight after warmup. Lambda controls quality priority.
         total_loss = self.lmbda * d_loss + rate_weight * bpp_loss + self.lmbda * reg_loss

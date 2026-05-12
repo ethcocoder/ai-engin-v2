@@ -28,8 +28,7 @@ class SovereignQuantizer(nn.Module):
         super().__init__()
         self.channels = channels
         self.max_step = max_step
-        # CRITICAL FIX: Step=1.0 gives ~20 bins/channel (low entropy = small files)
-        # Old step=0.1 gave ~200 bins/channel (high entropy = bloated files)
+        # Step=1.0 gives ~20 bins/channel (aggressive compression)
         self.step_size = nn.Parameter(torch.ones(channels) * 1.0)
     
     def forward(self, x, force_hard=False, hard_prob=0.0):

@@ -9,7 +9,7 @@ class ChannelAttention(nn.Module):
     """
     def __init__(self, in_planes):
         super().__init__()
-        # FIX 5: Balanced bottleneck ratio
+        # Balanced bottleneck ratio
         ratio = max(4, in_planes // 64)
         self.avg_pool = nn.AdaptiveAvgPool2d(1)
         self.max_pool = nn.AdaptiveMaxPool2d(1)
@@ -23,7 +23,6 @@ class ChannelAttention(nn.Module):
     def forward(self, x):
         avg_out = self.fc(self.avg_pool(x))
         max_out = self.fc(self.max_pool(x))
-        # FIX 5: Standard sigmoid with temperature
         return torch.sigmoid((avg_out + max_out) / self.temperature)
 
 class MultiScaleSpatialAttention(nn.Module):
@@ -33,7 +32,7 @@ class MultiScaleSpatialAttention(nn.Module):
     def __init__(self, channels):
         super().__init__()
         self.local = nn.Conv2d(2, 1, 7, padding=3)
-        # FIX 6: Global path is now spatially aware via 1x1 projection
+        # Global path is now spatially aware via 1x1 projection
         self.global_proj = nn.Sequential(
             nn.Conv2d(channels, channels // 4, 1),
             nn.GELU(),
@@ -103,14 +102,8 @@ class ResidualRefinementNetwork(nn.Module):
 
     def forward(self, recon, decoder_features):
         x = torch.cat([recon, decoder_features], dim=1)
-        x = self.initial(x)
-        x = self.refine_blocks(x)
-        res = self.final(x)
-        
-        # Adaptive gate based on decoder features
+        res = self.final(self.refine_blocks(self.initial(x)))
         gate = self.residual_gate(decoder_features)
-        
-        # Clamp residual to prevent color explosion
         return recon + gate * torch.clamp(res, -0.5, 0.5)
 
 class SynthesisTransform(nn.Module):

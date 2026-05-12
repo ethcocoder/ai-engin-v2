@@ -46,12 +46,12 @@ class AdversarialLoss(nn.Module):
         # Safety detach to ensure D only learns from its own predictions
         fake_preds_detached = [fp.detach() for fp in fake_preds]
         
-        # FIX 4: Default weights for multi-scale (H/1, H/2, H/4)
+        # Default weights for multi-scale (H/1, H/2, H/4)
         if weights is None:
-            weights = [1.0, 0.8, 0.5] 
+            weights = [1.0, 0.8, 0.5]
         
         for i, (rp, fp) in enumerate(zip(real_preds, fake_preds_detached)):
-            # FIX 1: Label Smoothing
+            # Label Smoothing
             real_labels = torch.ones_like(rp) * self.smooth_real
             fake_labels = torch.zeros_like(fp) + self.smooth_fake
             
@@ -92,11 +92,11 @@ class AdversarialLoss(nn.Module):
         d_loss = self.discriminator_loss(real_preds, fake_preds)
         g_adv_loss = self.generator_loss(fake_preds)
         
-        # FIX 2: Feature Matching Loss
+        # Feature Matching Loss
         fm_loss = self.feature_matching_loss(real_features, fake_features)
         g_loss_total = g_adv_loss + fm_loss
         
-        # FIX 8: Metrics Dashboard
+        # Metrics Dashboard
         metrics = {
             'd_loss': d_loss.item(),
             'g_adv': g_adv_loss.item(),

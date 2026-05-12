@@ -24,7 +24,7 @@ class Discriminator(nn.Module):
     def __init__(self, in_channels=3, base_channels=64):
         super().__init__()
         
-        # FIX 1, 3, 4: Added InstanceNorm, removed bias, removed inplace LeakyReLU
+        # Spectral Norm + InstanceNorm for stabilized training
         self.layers = nn.ModuleList([
             # Layer 0: H/2
             nn.Sequential(
@@ -51,7 +51,7 @@ class Discriminator(nn.Module):
             ),
         ])
         
-        # Final layer: Outputs Logits (FIX 2)
+        # Final layer: Outputs Logits
         self.final = spectral_norm(nn.Conv2d(base_channels * 8, 1, 4, stride=1, padding=1, bias=False))
     
     def forward(self, x, return_features=False):
@@ -73,7 +73,7 @@ class MultiScaleDiscriminator(nn.Module):
     """
     def __init__(self, num_scales=3, in_channels=3):
         super().__init__()
-        # FIX 7: Default to 3 scales for elite performance
+        # Default to 3 scales for multi-resolution feedback
         self.discriminators = nn.ModuleList([
             Discriminator(in_channels) for _ in range(num_scales)
         ])

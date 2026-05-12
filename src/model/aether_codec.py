@@ -82,19 +82,19 @@ class AetherCodec(nn.Module):
             y_hat_expanded = y_hat.unsqueeze(2)  # (B, C, 1, H, W)
             dist = torch.distributions.Normal(means, scales)
             
-            # CRITICAL FIX: explicit step shape
-            step = y_step.view(1, -1, 1, 1, 1)  # (1, C, 1, 1, 1)
+            # Explicit step shape for broadcasting
+            step = y_step.view(1, -1, 1, 1, 1)
             
             lower = dist.cdf(y_hat_expanded - step / 2)
             upper = dist.cdf(y_hat_expanded + step / 2)
             p_y = (upper - lower) * weights
-            p_y = p_y.sum(dim=2)  # Marginalize mixture (B, C, H, W)
+            p_y = p_y.sum(dim=2)  # Marginalize mixture
             p_y = torch.clamp(p_y, min=1e-9)
             likelihoods['y'] = p_y
             
             # Hyper-latent prior (factorized Gaussian)
             z_dist = torch.distributions.Normal(0.0, 1.0)
-            z_step_v = z_step.view(1, -1, 1, 1)  # CRITICAL FIX
+            z_step_v = z_step.view(1, -1, 1, 1)
             
             z_lower = z_dist.cdf(z_hat - z_step_v / 2)
             z_upper = z_dist.cdf(z_hat + z_step_v / 2)
