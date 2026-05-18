@@ -9,8 +9,8 @@ __pycache__/
 data/
 datasets/
 checkpoints/
-*.pth
-*.pt
+
+
 *.pdox
 *.png
 *.jpg
