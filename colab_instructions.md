@@ -11,7 +11,7 @@ Allocate a standard GPU runtime (e.g., NVIDIA Tesla T4) and execute the block be
 
 ```bash
 # Clone the repository and install required modules
-!git clone https://github.com/ethcocoder/ai-engin-v2.git
+!git clone -b feat/optimization-curriculum https://github.com/ethcocoder/ai-engin-v2.git
 %cd ai-engin-v2
 !pip install -r requirements.txt
 ```
