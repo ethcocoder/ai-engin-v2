@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qau-qvs"
+version = "1.1.0"
+description = "Quantum Absolute Unit (QAU) - Sovereign Substrate"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "numpy>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[tool.setuptools]
+packages = ["qau_qvs", "qau_qvs.core", "qau_qvs.fields"]

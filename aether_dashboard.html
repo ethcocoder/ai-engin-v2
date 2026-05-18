@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AetherQAU: Sovereign Quantum-Secured Mesh Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&family=Space+Grotesk:wght@300;400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #050505;
+            --cyan: #06b6d4;
+            --purple: #a855f7;
+            --pink: #ec4899;
+            --glass-bg: rgba(20, 20, 20, 0.4);
+            --glass-border: rgba(255, 255, 255, 0.08);
+            --text-main: #f1f5f9;
+            --text-muted: #94a3b8;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Space Grotesk', sans-serif;
+            cursor: crosshair;
+        }
+
+        body {
+            background-color: var(--bg);
+            background-image: 
+                radial-gradient(circle at 5% 5%, rgba(6, 182, 212, 0.1) 0%, transparent 35%),
+                radial-gradient(circle at 95% 95%, rgba(168, 85, 247, 0.1) 0%, transparent 35%),
+                url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3%3Cfilter id='noiseFilter'%3%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3%3C/filter%3%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3%3C/svg%3");
+            background-blend-mode: overlay;
+            color: var(--text-main);
+            min-height: 100vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* 👑 Header Section */
+        header {
+            padding: 1.5rem 3rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--glass-border);
+            backdrop-filter: blur(20px);
+            z-index: 1000;
+        }
+
+        .title-group {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .main-logo {
+            font-size: 1.8rem;
+            font-weight: 700;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            background: linear-gradient(90deg, var(--cyan), var(--purple), var(--pink));
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            filter: drop-shadow(0 0 10px rgba(6, 182, 212, 0.3));
+        }
+
+        .subtitle {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            letter-spacing: 0.3em;
+            margin-top: -0.2rem;
+        }
+
+        .mesh-stats {
+            display: flex;
+            gap: 2rem;
+        }
+
+        .stat-badge {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+        }
+
+        .stat-label { font-size: 0.65rem; color: var(--text-muted); opacity: 0.7; }
+        .stat-val { font-size: 1.1rem; font-weight: 600; color: var(--cyan); }
+
+        /* 📊 Dashboard Grid */
+        main {
+            flex: 1;
+            display: grid;
+            grid-template-columns: 350px 1fr 350px;
+            gap: 2rem;
+            padding: 2rem 3rem;
+            position: relative;
+        }
+
+        /* 🧪 Glass Widgets */
+        .widget {
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            backdrop-filter: blur(15px);
+            border-radius: 1.5rem;
+            padding: 1.8rem;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+            transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275), border-color 0.3s;
+        }
+
+        .widget:hover {
+            transform: translateY(-5px) scale(1.02);
+            border-color: var(--cyan);
+        }
+
+        .widget-title {
+            font-size: 0.85rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin-bottom: 1.5rem;
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+        }
+
+        .widget-title::before {
+            content: '';
+            width: 4px;
+            height: 12px;
+            background: var(--cyan);
+            border-radius: 2px;
+            box-shadow: 0 0 10px var(--cyan);
+        }
+
+        /* 🕸️ Mesh Visualization (Center) */
+        .mesh-viz-container {
+            position: relative;
+            background: radial-gradient(circle at 50% 50%, rgba(168, 85, 247, 0.05) 0%, transparent 60%);
+            border-radius: 2rem;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #aether-canvas {
+            width: 100%;
+            height: 100%;
+        }
+
+        .overlay-center {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            pointer-events: none;
+        }
+
+        .core-orb {
+            width: 120px;
+            height: 120px;
+            background: radial-gradient(circle, var(--purple) 0%, transparent 70%);
+            border-radius: 50%;
+            filter: blur(20px);
+            animation: breathe 4s infinite alternate;
+            opacity: 0.3;
+        }
+
+        @keyframes breathe {
+            from { transform: scale(1); opacity: 0.2; }
+            to { transform: scale(1.5); opacity: 0.4; }
+        }
+
+        /* 📋 Tactical Info (Left/Right) */
+        .info-list {
+            display: flex;
+            flex-direction: column;
+            gap: 1.2rem;
+        }
+
+        .info-card {
+            background: rgba(255,255,255,0.03);
+            border-left: 3px solid var(--purple);
+            padding: 1rem;
+            border-radius: 0.5rem;
+        }
+
+        .info-label { font-size: 0.65rem; color: var(--text-muted); }
+        .info-val { font-size: 0.95rem; font-weight: 600; }
+
+        .progress-bar {
+            height: 6px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 3px;
+            margin-top: 0.5rem;
+            overflow: hidden;
+        }
+
+        .fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--cyan), var(--purple));
+            width: 88%;
+            box-shadow: 0 0 15px var(--cyan);
+        }
+
+        /* 🕹️ Controls */
+        .action-dock {
+            position: absolute;
+            bottom: 2rem;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            backdrop-filter: blur(30px);
+            padding: 0.8rem 2rem;
+            border-radius: 5rem;
+            display: flex;
+            gap: 1.5rem;
+        }
+
+        .glow-btn {
+            background: none;
+            border: 1px solid rgba(255,255,255,0.1);
+            color: white;
+            padding: 0.8rem 1.8rem;
+            border-radius: 2rem;
+            cursor: pointer;
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 0.75rem;
+            letter-spacing: 0.05em;
+            transition: all 0.3s;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .glow-btn:hover {
+            border-color: var(--cyan);
+            box-shadow: 0 0 20px rgba(6, 182, 212, 0.4);
+            transform: scale(1.05);
+        }
+
+        .glow-btn.primary {
+            background: linear-gradient(45deg, var(--cyan), var(--purple));
+            border: none;
+        }
+
+        /* 💾 Terminal/Logs */
+        .terminal {
+            font-family: 'Space Grotesk', monospace;
+            font-size: 0.7rem;
+            color: var(--cyan);
+            background: rgba(0,0,0,0.4);
+            border-radius: 1rem;
+            padding: 1rem;
+            height: 180px;
+            overflow-y: auto;
+            mask-image: linear-gradient(to bottom, transparent, white 20%);
+        }
+
+        .terminal span { color: var(--purple); font-weight: 700; }
+        
+        /* Ambient particles */
+        #particles {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none;
+            z-index: -1;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="title-group">
+            <h1 class="main-logo">AetherQAU</h1>
+            <span class="subtitle">Sovereign Quantum-Secured Mesh Engine</span>
+        </div>
+        <div class="mesh-stats">
+            <div class="stat-badge">
+                <span class="stat-label">System Entropy</span>
+                <span class="stat-val">2.8e4 bits</span>
+            </div>
+            <div class="stat-badge">
+                <span class="stat-label">Substrate Sync</span>
+                <span class="stat-val">Synced</span>
+            </div>
+        </div>
+    </header>
+
+    <main>
+        <!-- LEFT: Lattice Intelligence -->
+        <div class="sidebar" style="display: flex; flex-direction: column; gap: 2rem;">
+            <div class="widget">
+                <div class="widget-title">Active Mesh Nodes</div>
+                <div class="info-list" id="node-list">
+                    <div class="info-card">
+                        <div class="info-label">NODE_ALPHA_01</div>
+                        <div class="info-val">Fidelity: 99.8%</div>
+                        <div class="progress-bar"><div class="fill" style="width: 99.8%"></div></div>
+                    </div>
+                    <div class="info-card">
+                        <div class="info-label">NODE_BETA_08</div>
+                        <div class="info-val">Fidelity: 98.4%</div>
+                        <div class="progress-bar"><div class="fill" style="width: 98.4%; background: var(--pink); box-shadow: 0 0 15px var(--pink);"></div></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="widget">
+                <div class="widget-title">Predictive Core</div>
+                <div id="prediction-out" style="font-size: 0.85rem; line-height: 1.6;">
+                    <span style="color: var(--cyan);">[INFO]</span> Quantizing Hilbert Space...<br>
+                    <span style="color: var(--purple);">[RESULT]</span> Global Minimum Identified.<br>
+                    <span style="font-weight: 700; color: white;">BULLISH</span> Confidence: 94.2%
+                </div>
+            </div>
+        </div>
+
+        <!-- CENTER: Holo Visualization -->
+        <div class="mesh-viz-container">
+            <canvas id="aether-canvas"></canvas>
+            <div class="overlay-center">
+                <div class="core-orb"></div>
+            </div>
+            
+            <div class="action-dock">
+                <button class="glow-btn primary" onclick="command('INITIALIZE_NCB')">FORGE BOND</button>
+                <button class="glow-btn" onclick="command('QUANTUM_SWEEP')">SWEEP FIELD</button>
+                <button class="glow-btn" onclick="command('COLLAPSE_ALL')">MEASURE</button>
+            </div>
+        </div>
+
+        <!-- RIGHT: Agent & Logs -->
+        <div class="sidebar" style="display: flex; flex-direction: column; gap: 2rem;">
+            <div class="widget" style="flex: 1;">
+                <div class="widget-title">Substrate Logs</div>
+                <div class="terminal" id="term-out">
+                    <span>></span> Kernel Loaded [0.00ms]<br>
+                    <span>></span> Forge NCB: [SUCCESS]<br>
+                    <span>></span> Superposition Multiplicity Level: 4<br>
+                    <span>></span> Weave Phase map applied.<br>
+                    <span>></span> Awaiting user instruction...
+                </div>
+            </div>
+
+            <div class="widget">
+                <div class="widget-title">Quantum Agent</div>
+                <div style="text-align: center;">
+                    <div style="font-size: 2.2rem; font-weight: 700; color: var(--cyan);">0.984</div>
+                    <div class="stat-label">Agent Stability Index</div>
+                    <div style="margin-top: 1rem; font-size: 0.75rem; color: var(--pink);">[STATUS] Actively Optimizing Flow</div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <canvas id="particles"></canvas>
+
+    <script>
+        const canvas = document.getElementById('aether-canvas');
+        const ctx = canvas.getContext('2d');
+        let width, height;
+
+        const points = [];
+        const maxPoints = 12;
+
+        function init() {
+            window.addEventListener('resize', resize);
+            resize();
+            createMesh();
+            animate();
+            initParticles();
+        }
+
+        function resize() {
+            width = canvas.width = canvas.parentElement.offsetWidth;
+            height = canvas.height = canvas.parentElement.offsetHeight;
+        }
+
+        function createMesh() {
+            for(let i=0; i<maxPoints; i++) {
+                points.push({
+                    x: Math.random() * width,
+                    y: Math.random() * height,
+                    vx: (Math.random() - 0.5) * 0.8,
+                    vy: (Math.random() - 0.5) * 0.8,
+                    phase: Math.random() * Math.PI * 2
+                });
+            }
+        }
+
+        function animate() {
+            ctx.clearRect(0,0, width, height);
+            
+            // Draw Bonds (NCB Connections)
+            ctx.lineWidth = 1;
+            points.forEach((p, idx) => {
+                p.x += p.vx;
+                p.y += p.vy;
+                p.phase += 0.02;
+
+                if(p.x < 0 || p.x > width) p.vx *= -1;
+                if(p.y < 0 || p.y > height) p.vy *= -1;
+
+                // Connection Logic
+                for(let j=idx+1; j<points.length; j++) {
+                    const p2 = points[j];
+                    const dist = Math.hypot(p.x - p2.x, p.y - p2.y);
+                    if(dist < 300) {
+                        const grad = ctx.createLinearGradient(p.x, p.y, p2.x, p2.y);
+                        const alpha = (1 - dist/300) * 0.3;
+                        grad.addColorStop(0, `rgba(6, 182, 212, ${alpha})`);
+                        grad.addColorStop(1, `rgba(168, 85, 247, ${alpha})`);
+                        ctx.strokeStyle = grad;
+                        ctx.beginPath();
+                        ctx.moveTo(p.x, p.y);
+                        ctx.lineTo(p2.x, p2.y);
+                        ctx.stroke();
+                    }
+                }
+
+                // Draw Nodes
+                const glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 10);
+                glow.addColorStop(0, 'white');
+                glow.addColorStop(1, 'transparent');
+                ctx.fillStyle = glow;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 4 + Math.sin(p.phase)*2, 0, Math.PI*2);
+                ctx.fill();
+            });
+
+            requestAnimationFrame(animate);
+        }
+
+        function command(type) {
+            const out = document.getElementById('term-out');
+            const entry = document.createElement('div');
+            entry.innerHTML = `<span>></span> [CMD] ${type}: Processing...`;
+            out.appendChild(entry);
+            out.scrollTop = out.scrollHeight;
+
+            // Flash effect on nodes
+            points.forEach(p => { p.vx *= 3; p.vy *= 3; });
+            setTimeout(() => points.forEach(p => { p.vx /= 3; p.vy /= 3; }), 300);
+        }
+
+        // Star Background
+        function initParticles() {
+            const pCanvas = document.getElementById('particles');
+            const pCtx = pCanvas.getContext('2d');
+            let w = pCanvas.width = window.innerWidth;
+            let h = pCanvas.height = window.innerHeight;
+            
+            const stars = Array(200).fill().map(() => ({
+                x: Math.random() * w,
+                y: Math.random() * h,
+                s: Math.random() * 2
+            }));
+
+            function drawStars() {
+                pCtx.clearRect(0,0, w, h);
+                pCtx.fillStyle = 'rgba(255,255,255,0.4)';
+                stars.forEach(s => {
+                    pCtx.beginPath();
+                    pCtx.arc(s.x, s.y, s.s, 0, Math.PI*2);
+                    pCtx.fill();
+                });
+                requestAnimationFrame(drawStars);
+            }
+            drawStars();
+        }
+
+        init();
+    </script>
+</body>
+</html>

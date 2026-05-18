@@ -1,0 +1,28 @@
+# PyTorch / Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Core data & storage
+data/
+datasets/
+checkpoints/
+*.pth
+*.pt
+*.pdox
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+
+# IDEs & System
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Test temp files
+test_temp.pdox
