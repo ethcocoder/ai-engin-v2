@@ -23,7 +23,7 @@ class RateDistortionLoss(nn.Module):
     def __init__(self, lmbda=0.01, use_ms_ssim=False, use_lpips=False, 
                  use_entanglement=False, entanglement_weight=0.01,
                  lpips_weight=0.1, lpips_warmup_epochs=10,
-                 max_bpp=4.0, total_epochs=40, rate_warmup_pct=0.1):
+                 max_bpp=24.0, total_epochs=40, rate_warmup_pct=0.3):
         super().__init__()
         self.lmbda = lmbda
         self.use_ms_ssim = use_ms_ssim
@@ -64,10 +64,9 @@ class RateDistortionLoss(nn.Module):
         N, _, H, W = x.shape
         num_pixels = N * H * W
         
-        # Shortened warmup for shorter training runs.
-        warmup_end = max(1, int(self.total_epochs * self.rate_warmup_pct))
+        # Smooth warmup to prevent sudden loss explosions.
+        warmup_end = max(2, int(self.total_epochs * self.rate_warmup_pct))
         if self.current_epoch < warmup_end:
-            # Faster ramp: start at 0.1 instead of 0.01
             rate_weight = 0.1 + 0.9 * (self.current_epoch / warmup_end)
         else:
             rate_weight = 1.0

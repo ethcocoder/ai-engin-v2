@@ -101,6 +101,33 @@ def train_stage2(model, dataloader, epochs=100, device='cuda', ema=None, lmbda=0
                 })
                 
         print(f"Epoch {epoch+1} Completed. Avg Loss: {epoch_loss/len(dataloader):.4f}")
+        
+        # --- Save Epoch Visual Sample & .padox Binary ---
+        try:
+            from torchvision.utils import save_image
+            from src.utils.entropy_coder import ParadoxEntropyCoder
+            sample_dir = "sample-stage2"
+            os.makedirs(sample_dir, exist_ok=True)
+            
+            model.eval()
+            with torch.no_grad():
+                x_sample = x[0:1] # First image of last batch
+                x_hat_sample, _, m_sample = model(x_sample, hard_prob=1.0) # Force hard quantization
+                
+                # Side-by-side: Original vs Reconstructed
+                comp = torch.cat([x_sample[0], x_hat_sample[0].clamp(-1, 1)], dim=2)
+                comp = (comp + 1) / 2 # Normalize to [0, 1]
+                save_image(comp, f"{sample_dir}/epoch_{epoch+1}.png")
+                
+                # Save binary bitstream
+                coder = ParadoxEntropyCoder()
+                z_hat_s = m_sample.get('z_hat')
+                z_step_s = m_sample.get('z_step')
+                coder.compress(m_sample['y_hat'], z_hat_s, m_sample['y_step'], z_step_s, 
+                               f"{sample_dir}/epoch_{epoch+1}.padox")
+            model.train()
+        except Exception as e:
+            print(f"⚠️ Could not save sample: {e}")
 
         # Checkpoint Management
         checkpoint = {

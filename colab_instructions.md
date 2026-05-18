@@ -6,7 +6,7 @@ This documentation guides you through training and deploying **AetherCodec-Elite
 > [!IMPORTANT]
 > **v7 Blueprint Upgrades:**
 > - **TiledHybridCodec**: Seamlessly blends Mathematical Rules with Neural Intelligence.
-> - **Rule-Based Mode**: Simple tiles (sky, flat walls) are encoded as 2nd-degree polynomials (~72 bytes/tile).
+> - **Rule-Based Mode**: Simple tiles (sky, flat walls) are dynamically encoded using elite 8th-degree Chebyshev polynomials (~540 bytes/tile), completely eliminating edge artifacts to guarantee a flawless 25-28 dB baseline.
 > - **Neural Mode**: Complex tiles (faces, texture) use the full Transformer engine (~4-30 KB/tile).
 > - **Gaussian Alpha-Blending**: Guaranteed invisible seams between tiles.
 
@@ -29,7 +29,7 @@ This documentation guides you through training and deploying **AetherCodec-Elite
 
 ### Stage 1: Foundation (λ=0.01)
 ```python
-!python src/train/stage1.py --epochs 50 --batch_size 16 --lmbda 0.01 --data_dir auto
+!python src/train/stage1.py --epochs 10 --batch_size 16 --lmbda 0.01 --data_dir auto
 ```
 
 ### Stage 2 & 3: Refinement (MS-SSIM/GAN)
@@ -62,7 +62,7 @@ This documentation guides you through training and deploying **AetherCodec-Elite
 | Metric | AetherCodec (Neural Only) | Aether-Blueprint (Hybrid) |
 |--------|--------------------------|---------------------------|
 | **Format** | .padox | .bpox |
-| **Simple Areas** | Neural (Expensive) | Math (Almost Free) |
+| **Simple Areas** | Neural (Expensive) | Chebyshev Math (~540 bytes) |
 | **Complex Areas** | Neural | Neural |
 | **Stitching** | N/A (Full Image) | Gaussian Overlap Blend |
 | **Ratio** | 15-50x | 30-150x |

@@ -38,7 +38,7 @@ def train_stage1(model, dataloader, epochs=100, device='cuda', lmbda=0.01):
         use_lpips=False, 
         use_entanglement=True, 
         total_epochs=epochs,
-        rate_warmup_pct=0.1  # Only 10% warmup — rate kicks in fast
+        rate_warmup_pct=0.3  # Smoothed 30% warmup to prevent loss explosion
     ).to(device)
     
     # ELITE ACCURACY: OneCycleLR for faster convergence and better optima
@@ -113,7 +113,7 @@ def train_stage1(model, dataloader, epochs=100, device='cuda', lmbda=0.01):
             
             if batch_idx % 10 == 0:
                 # Show rate_weight so user can verify warmup progress
-                warmup_end = max(1, int(epochs * 0.1))
+                warmup_end = max(2, int(epochs * 0.3))
                 rw = min(1.0, 0.1 + 0.9 * (epoch / warmup_end)) if epoch < warmup_end else 1.0
                 
                 # Show step_size stats for compression monitoring
@@ -133,6 +133,33 @@ def train_stage1(model, dataloader, epochs=100, device='cuda', lmbda=0.01):
         avg_bpp = epoch_bpp / len(dataloader)
         avg_dist = epoch_distortion / len(dataloader)
         print(f"Epoch {epoch+1} | Loss: {avg_loss:.4f} | BPP: {avg_bpp:.3f} | Distortion: {avg_dist:.4f}")
+        
+        # --- Save Epoch Visual Sample & .padox Binary ---
+        try:
+            from torchvision.utils import save_image
+            from src.utils.entropy_coder import ParadoxEntropyCoder
+            sample_dir = "sample-stage1"
+            os.makedirs(sample_dir, exist_ok=True)
+            
+            model.eval()
+            with torch.no_grad():
+                x_sample = x[0:1] # First image of last batch
+                x_hat_sample, _, m_sample = model(x_sample, hard_prob=1.0) # Force hard quantization for honest test
+                
+                # Side-by-side: Original vs Reconstructed
+                comp = torch.cat([x_sample[0], x_hat_sample[0].clamp(-1, 1)], dim=2)
+                comp = (comp + 1) / 2 # Normalize to [0, 1]
+                save_image(comp, f"{sample_dir}/epoch_{epoch+1}.png")
+                
+                # Save binary bitstream
+                coder = ParadoxEntropyCoder()
+                z_hat_s = m_sample.get('z_hat')
+                z_step_s = m_sample.get('z_step')
+                coder.compress(m_sample['y_hat'], z_hat_s, m_sample['y_step'], z_step_s, 
+                               f"{sample_dir}/epoch_{epoch+1}.padox")
+            model.train()
+        except Exception as e:
+            print(f"⚠️ Could not save sample: {e}")
         
         # --- Checkpoint Saving ---
         checkpoint = {
