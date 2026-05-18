@@ -11,10 +11,11 @@ class HybridEntropyCoder:
     Handles both Polynomial coefficients (Rule-based) and Neural latents.
     
     Format Structure:
-    - Header: Magic(4), Version(4), Rows(4), Cols(4), DecisionMap(4)
+    Format Structure:
+    - Header: Magic(4), Version(4), Rows(4), Cols(4), DecisionMap(4), NumCoeffs(4)
     - Payload: Interleaved Math Coeffs and Neural Blobs
     """
-    def __init__(self, magic_bytes=b"BPOX", version=7):
+    def __init__(self, magic_bytes=b"BPOX", version=8):
         self.magic_bytes = magic_bytes
         self.version = version
 
@@ -32,14 +33,16 @@ class HybridEntropyCoder:
             if d > 0:
                 decision_map |= (1 << i)
         
-        header = struct.pack(">4sIIIII", 
+        num_coeffs = encoding['poly_coeffs_all'].shape[3]
+        
+        header = struct.pack(">4sIIIIII", 
                              self.magic_bytes, self.version,
-                             grid[0], grid[1], num_tiles, decision_map)
+                             grid[0], grid[1], num_tiles, decision_map, num_coeffs)
         
         payload = bytearray()
         
         # 2. Extract Data from Vectorized Encodings
-        poly_coeffs_all = encoding['poly_coeffs_all'][0].cpu().numpy() # (num_tiles, 3, 10)
+        poly_coeffs_all = encoding['poly_coeffs_all'][0].cpu().numpy() # (num_tiles, 3, num_coeffs)
         
         neural_data = encoding['neural_data']
         neu_idx = 0 # Pointer into neural batch
@@ -47,8 +50,8 @@ class HybridEntropyCoder:
         # 3. Pack Tiles Interleaved
         for i in range(num_tiles):
             if decisions[i] == 0:
-                # Math Tile: 10 coeffs * 3 channels = 30 floats
-                coeffs = poly_coeffs_all[i].astype(np.float32) # (3, 10)
+                # Math Tile: num_coeffs * 3 channels
+                coeffs = poly_coeffs_all[i].astype(np.float32) # (3, num_coeffs)
                 payload.extend(coeffs.tobytes())
             else:
                 # Neural Tile: Extract from batch
@@ -109,16 +112,16 @@ class HybridEntropyCoder:
         Reconstructs the vectorized hybrid encoding from a .bpox file.
         """
         with open(input_path, 'rb') as f:
-            header_size = struct.calcsize(">4sIIIII")
+            header_size = struct.calcsize(">4sIIIIII")
             header_data = f.read(header_size)
-            magic, ver, rows, cols, num_tiles, decision_map = struct.unpack(">4sIIIII", header_data)
+            magic, ver, rows, cols, num_tiles, decision_map, num_coeffs = struct.unpack(">4sIIIIII", header_data)
             
             decisions = []
             for i in range(num_tiles):
                 decisions.append(1 if (decision_map & (1 << i)) else 0)
             
             decisions_t = torch.tensor([decisions], device=device)
-            poly_coeffs_all = torch.zeros(1, num_tiles, 3, 10, device=device)
+            poly_coeffs_all = torch.zeros(1, num_tiles, 3, num_coeffs, device=device)
             
             y_hat_list = []
             y_step_list = []
@@ -128,9 +131,9 @@ class HybridEntropyCoder:
             
             for i in range(num_tiles):
                 if decisions[i] == 0:
-                    # Math: 30 floats
-                    coeff_data = f.read(30 * 4)
-                    coeffs = np.frombuffer(coeff_data, dtype=np.float32).reshape(3, 10)
+                    # Math: num_coeffs * 3 floats
+                    coeff_data = f.read(num_coeffs * 3 * 4)
+                    coeffs = np.frombuffer(coeff_data, dtype=np.float32).reshape(3, num_coeffs)
                     poly_coeffs_all[0, i] = torch.from_numpy(coeffs).to(device)
                     complex_mask.append(False)
                 else:

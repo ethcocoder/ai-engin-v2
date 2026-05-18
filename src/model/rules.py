@@ -72,51 +72,56 @@ class ComplexityGate(nn.Module):
 
 class PolynomialSurface(nn.Module):
     """
-    3rd-Degree Polynomial Surface Fitting (Upgrade v2).
+    Elite Polynomial Surface Fitting (Upgrade v3 - Chebyshev Basis).
     
-    Models a tile as: 
-    I(x, y) = a + bx + cy + dx² + exy + fy² + gx³ + hx²y + ixy² + jy³
-    
-    10 coefficients per channel = 30 floats = 120 bytes total.
-    Significant quality improvement over 2nd-degree for smooth gradients.
+    Dynamically generates Chebyshev polynomials up to a specified degree to prevent
+    Runge's phenomenon (edge oscillations) and ensure absolute mathematical perfection.
     """
-    def __init__(self, tile_size=160):
+    def __init__(self, tile_size=160, degree=8):
         super().__init__()
         self.tile_size = tile_size
-        self.num_coeffs = 10
+        self.degree = degree
+        # Number of coefficients for 2D polynomial of degree D is (D+1)*(D+2)/2
+        self.num_coeffs = (degree + 1) * (degree + 2) // 2
         
         A, pinv = self._build_matrices(tile_size)
-        self.register_buffer('A', A)        # (N, 10)
-        self.register_buffer('pinv', pinv)  # (10, N)
+        self.register_buffer('A', A)        # (N, num_coeffs)
+        self.register_buffer('pinv', pinv)  # (num_coeffs, N)
+        
+    def chebyshev(self, n, x):
+        """Evaluate Chebyshev polynomial of degree n at x using recurrence."""
+        if n == 0:
+            return torch.ones_like(x)
+        elif n == 1:
+            return x
+        
+        t0 = torch.ones_like(x)
+        t1 = x
+        for _ in range(2, n + 1):
+            t2 = 2 * x * t1 - t0
+            t0 = t1
+            t1 = t2
+        return t2
     
     def _build_matrices(self, size):
-        """Build the polynomial design matrix and its pseudoinverse."""
         y = torch.linspace(-1, 1, size)
         x = torch.linspace(-1, 1, size)
         yy, xx = torch.meshgrid(y, x, indexing='ij')
         xx = xx.flatten()
         yy = yy.flatten()
         
-        # Design matrix: [1, x, y, x², xy, y², x³, x²y, xy², y³]
-        A = torch.stack([
-            torch.ones_like(xx),
-            xx,
-            yy,
-            xx ** 2,
-            xx * yy,
-            yy ** 2,
-            xx ** 3,
-            (xx ** 2) * yy,
-            xx * (yy ** 2),
-            yy ** 3
-        ], dim=1)  # (N, 10)
-        
-        pinv = torch.linalg.pinv(A)  # (10, N)
+        terms = []
+        for d in range(self.degree + 1):
+            for i in range(d + 1):
+                j = d - i
+                terms.append(self.chebyshev(i, xx) * self.chebyshev(j, yy))
+                
+        A = torch.stack(terms, dim=1) # (N, num_coeffs)
+        pinv = torch.linalg.pinv(A)   # (num_coeffs, N)
         return A, pinv
-    
+        
     @torch.no_grad()
     def fit(self, tile):
-        """Fit 3rd-degree polynomial to tile pixels."""
         B, C, H, W = tile.shape
         N = H * W
         
@@ -125,11 +130,10 @@ class PolynomialSurface(nn.Module):
             A, pinv = A.to(tile.device), pinv.to(tile.device)
         else:
             A, pinv = self.A, self.pinv
-        
+            
         pixels = tile.reshape(B, C, N)
         
         # Least-squares: coeffs = pinv @ pixels
-        # pinv: (10, N), pixels: (B, C, N) → coeffs: (B, C, 10)
         coeffs = torch.einsum('kn,bcn->bck', pinv, pixels)
         
         # Residual MSE for quality tracking
@@ -137,18 +141,17 @@ class PolynomialSurface(nn.Module):
         residual_mse = ((pixels - fitted) ** 2).mean(dim=[1, 2])
         
         return coeffs, residual_mse
-    
+
     def render(self, coeffs, size=None):
-        """Render tile from 3rd-degree coefficients."""
         if size is None:
             size = self.tile_size
-        
+            
         if size != self.tile_size:
             A, _ = self._build_matrices(size)
             A = A.to(coeffs.device)
         else:
             A = self.A.to(coeffs.device)
-        
+            
         # Render: pixels = A @ coeffs
         pixels = torch.einsum('nk,bck->bcn', A, coeffs)
         

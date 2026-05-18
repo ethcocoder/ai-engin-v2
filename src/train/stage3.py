@@ -163,6 +163,8 @@ if __name__ == "__main__":
     print(f"Initializing AetherCodec Stage 3 Training...")
     print(f"Epochs: {args.epochs}, Batch Size: {args.batch_size}, Data: {args.data_dir}")
     print(f"Dataset Config: Massive={'Disabled' if args.no_massive else 'Enabled'}, CLIC={'Disabled' if args.no_clic else 'Enabled'}, Flickr2K={'Enabled' if args.use_flickr2k else 'Disabled'}")
+    
+    model = AetherCodec()
     if os.path.exists('stage2_refined.pth'):
         model.load_state_dict(torch.load('stage2_refined.pth', weights_only=True))
         print("Loaded Stage 2 weights.")

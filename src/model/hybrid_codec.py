@@ -97,7 +97,7 @@ class TiledHybridCodec(nn.Module):
             'grid': grid,
             'decisions': decisions,
             'scores': scores,
-            'poly_coeffs_all': coeffs_all.view(B, num_tiles, 3, 10),
+            'poly_coeffs_all': coeffs_all.view(B, num_tiles, 3, self.poly.num_coeffs),
             'neural_data': neural_data,
             'num_tiles': num_tiles,
         }
@@ -113,7 +113,7 @@ class TiledHybridCodec(nn.Module):
         neural_data = encoding['neural_data']
         
         # 1. Render all Polynomial tiles
-        decoded_tiles = self.poly.render(coeffs_all.reshape(B * num_tiles, 3, 10), 
+        decoded_tiles = self.poly.render(coeffs_all.reshape(B * num_tiles, 3, self.poly.num_coeffs), 
                                         size=self.padded_tile)
         decoded_tiles = decoded_tiles.view(B, num_tiles, 3, self.padded_tile, self.padded_tile)
         
@@ -166,8 +166,8 @@ class TiledHybridCodec(nn.Module):
         num_total = encoding['num_tiles']
         num_poly = num_total - num_complex
         
-        # Polynomial: 10 coeffs × 3 channels × 4 bytes = 120 bytes per tile
-        poly_bytes = num_poly * 120
+        # Polynomial: num_coeffs × 3 channels × 4 bytes
+        poly_bytes = num_poly * self.poly.num_coeffs * 3 * 4
         
         # Neural: estimate from latent size
         neural_bytes = 0
